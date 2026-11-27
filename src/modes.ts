@@ -131,6 +131,7 @@ export function createModes(
   const parryEdge = terminal.querySelector<HTMLElement>('#reticle') ?? document.createElement('div')
   parryEdge.classList.add('parry-reticle')
   parryEdge.dataset.ui = 'parry-edge'
+  parryEdge.dataset.phase = 'idle'
   parryEdge.inert = true
   parryEdge.setAttribute('aria-hidden', 'true')
   parryEdge.hidden = true
@@ -147,6 +148,7 @@ export function createModes(
   let previousHeroStyle = ''
   let entering: HTMLElement | null = null
   let sweep: HTMLElement | null = null
+  let industryHandoff: HTMLElement | null = null
   let exitTimer: ReturnType<typeof setTimeout> | undefined
   let sweepTimer: ReturnType<typeof setTimeout> | undefined
   let selectedCell = -1
@@ -215,6 +217,32 @@ export function createModes(
     entering = null
     sweep?.remove()
     sweep = null
+    if (industryHandoff) {
+      industryHandoff.removeEventListener('animationend', finishIndustryHandoff)
+      industryHandoff.removeEventListener('animationcancel', finishIndustryHandoff)
+      industryHandoff.removeAttribute('data-industry-handoff')
+      industryHandoff = null
+    }
+  }
+  function industryScanIsActive() {
+    return industryHandoff
+      ?.getAnimations?.()
+      .some(
+        (animation) =>
+          'animationName' in animation &&
+          animation.animationName === 'dd-industry-handoff' &&
+          (animation.playState === 'running' || animation.playState === 'paused'),
+      )
+  }
+  function finishIndustryHandoff(event: AnimationEvent) {
+    // A canceled animation's queued event can arrive after a subsequent switch to industry.
+    if (
+      event.target === industryHandoff &&
+      event.animationName === 'dd-industry-handoff' &&
+      !industryScanIsActive()
+    ) {
+      endTransition()
+    }
   }
   function reduceMotion() {
     if (motionPreference?.matches) endTransition()
@@ -223,6 +251,7 @@ export function createModes(
     endTransition()
     const previous = page === '' ? overworld : (root.firstElementChild as HTMLElement | null)
     const animate = page !== undefined && !motionPreference?.matches && (options.motionEnabled?.() ?? true)
+    const enteringIndustry = animate && game.state.mode === 3
     const focused = document.activeElement
     if (
       (previous?.contains(focused) || (next === 'city' && focused?.closest('#modes-nav'))) &&
@@ -253,7 +282,8 @@ export function createModes(
       outgoing.dataset.from = page === '' ? '1' : page === 'city' ? '2' : page === 'battle' ? '4' : '3'
       outgoing.inert = true
       outgoing.setAttribute('aria-hidden', 'true')
-      exitTimer = setTimeout(releasePrevious, 180)
+      // An industrial scan releases its source on the master animation's last frame.
+      if (!enteringIndustry) exitTimer = setTimeout(releasePrevious, 180)
     }
     if (shell) shell.dataset.mode = String(game.state.mode)
     if (overworld) overworld.hidden = next !== '' && outgoing !== overworld
@@ -279,7 +309,7 @@ export function createModes(
     if (animate) {
       entering = next === '' ? (overworld ?? null) : (root.firstElementChild as HTMLElement | null)
       entering?.classList.add('hud-entering')
-      root.firstElementChild?.classList.add('mh-page-enter')
+      if (!enteringIndustry) root.firstElementChild?.classList.add('mh-page-enter')
       sweep = document.createElement('div')
       sweep.className = 'mode-sweep'
       sweep.dataset.to = String(game.state.mode)
@@ -294,7 +324,16 @@ export function createModes(
       sweep.append(mark)
       const sweepHost = shell ?? container
       sweepHost.append(sweep)
-      sweepTimer = setTimeout(endTransition, 430)
+      if (enteringIndustry) {
+        industryHandoff = sweepHost
+        industryHandoff.setAttribute('data-industry-handoff', '')
+        industryHandoff.addEventListener('animationend', finishIndustryHandoff)
+        industryHandoff.addEventListener('animationcancel', finishIndustryHandoff)
+        // An unavailable stylesheet can leave no end event. Preserve a paused or delayed live cut.
+        sweepTimer = setTimeout(() => {
+          if (!industryScanIsActive()) endTransition()
+        }, 430)
+      } else sweepTimer = setTimeout(endTransition, 430)
     }
     if (next === 'raid') {
       const pins = field('loot-pins')
@@ -495,17 +534,30 @@ export function createModes(
     attr(field('boss-bar'), 'value', String(Math.round(ratio * 100)))
     write('boss-pct', Math.ceil(ratio * 100) + '%')
     write('phase', 'P' + (live ? b.phase : 1) + ' / 3')
-    const hot = live && b.stage === 'windup' && b.stageTime <= 0.26
+    const windup = live && b.stage === 'windup'
+    const hot = windup && b.stageTime <= 0.26
     const paused = Boolean((document.getElementById('drawer') as HTMLDialogElement | null)?.open)
     const edge = parryEdge
-    edge.hidden = !hot || paused
-    attr(edge, 'data-remaining', (live && b.stage === 'windup' ? b.stageTime : 0).toFixed(3))
+    edge.hidden = !windup || paused
+    attr(edge, 'data-phase', edge.hidden ? 'idle' : hot ? 'hot' : 'prelock')
+    attr(edge, 'data-remaining', (windup ? b.stageTime : 0).toFixed(3))
     if (!edge.hidden) {
       const reduce = motionPreference?.matches || options.motionEnabled?.() === false
-      const step = reduce ? 7 : Math.min(7, Math.max(0, Math.floor((0.26 - b.stageTime) * 30)))
+      const prelock = Math.min(
+        1,
+        Math.max(0, (b.stageDuration - b.stageTime) / Math.max(0.001, b.stageDuration - 0.26)),
+      )
+      const step = hot ? Math.min(7, Math.max(0, Math.floor((0.26 - b.stageTime) * 30))) : 0
+      // A larger inset always moves towards the screen centre. The last aim
+      // frame and first parry frame share the same inset and bracket length.
+      const travel = reduce ? 8 : hot ? 8 + Math.round((2 * step) / 7) : Math.round(8 * prelock)
+      const trim = hot || reduce ? 0 : Math.round(7 * (1 - prelock))
       attr(edge, 'data-step', String(step))
-      attr(edge, 'data-beat', step < 2 || step > 5 ? 'bone' : 'rust')
-      edge.style.setProperty('--reticle-travel', Math.round(((7 - step) * 4) / 7) + 'px')
+      attr(edge, 'data-beat', !hot ? 'quiet' : reduce || step < 2 || step > 5 ? 'bone' : 'rust')
+      if (edge.style.getPropertyValue('--reticle-travel') !== travel + 'px')
+        edge.style.setProperty('--reticle-travel', travel + 'px')
+      if (edge.style.getPropertyValue('--reticle-trim') !== trim + 'px')
+        edge.style.setProperty('--reticle-trim', trim + 'px')
     }
     attr(field('scope'), 'data-open', String(hot || b.stage === 'broken'))
     const stage = live ? b.stage : 'idle'
@@ -750,6 +802,7 @@ export function createModes(
       mode === 1 ? '' : mode === 2 ? 'city' : mode === 3 ? (r.active ? 'raid' : 'plant') : 'battle'
     if (target !== 'battle' && !parryEdge.hidden) {
       parryEdge.hidden = true
+      parryEdge.dataset.phase = 'idle'
       parryEdge.dataset.remaining = '0.000'
     }
     if (page !== target) mount(target)

@@ -61,7 +61,199 @@ export async function verifyOverworldChrome(page) {
       'Glyph contrast against sand and rock',
     )
   }
+  result.vignette = await page.locator('#viewport').evaluate((el) => {
+    const v = getComputedStyle(el, '::after')
+    return {
+      height: parseFloat(v.height),
+      bottom: v.bottom,
+      image: v.backgroundImage,
+      pointerEvents: v.pointerEvents,
+    }
+  })
+  const v = result.vignette
+  assert.ok(v.height > 0 && v.height <= 88 && parseFloat(v.bottom) === 0 && v.pointerEvents === 'none')
+  assert.match(v.image, /linear-gradient/)
+  assert.match(v.image, /rgba\([^)]*, 0\)/, 'Upper vignette edge must remain transparent')
   return result
+}
+
+export async function verifyIndustryCaption(page) {
+  const caption = await page.locator('.mh-industry:not(.mh-raid) > .mh-tl').evaluate((el) => {
+    const title = el.querySelector('.industry-title'),
+      style = getComputedStyle(title),
+      box = el.getBoundingClientRect()
+    const load = document.querySelector('.industry-power').getBoundingClientRect()
+    return {
+      ink: style.color,
+      paper: style.backgroundColor,
+      blockPaper: getComputedStyle(el).backgroundColor,
+      shadow: style.boxShadow,
+      radius: style.borderRadius,
+      filter: style.filter,
+      captionRight: box.right,
+      captionWidth: box.width,
+      loadLeft: load.left,
+    }
+  })
+  function linear(color) {
+    const rgb = color.match(/[\d.]+/g).map(Number)
+    assert.equal(rgb.length, 3, 'Caption plaque must be opaque')
+    return rgb.reduce((total, v, i) => {
+      const c = v / 255
+      return total + [0.2126, 0.7152, 0.0722][i] * (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)
+    }, 0)
+  }
+  const ink = linear(caption.ink),
+    paper = linear(caption.paper)
+  caption.contrast = (Math.max(ink, paper) + 0.05) / (Math.min(ink, paper) + 0.05)
+  assert.match(
+    caption.blockPaper,
+    /rgba\([^)]*, 0\)$/,
+    'Ground must show between the title, eyebrow and ruler',
+  )
+  assert.ok(caption.contrast >= 7 && caption.captionRight <= caption.loadLeft + 1)
+  assert.ok(caption.radius === '0px' && caption.shadow === 'none' && caption.filter === 'none')
+  return caption
+}
+
+async function industryCut(page, holdFrame = false) {
+  // Seek the actual, shared CSS animation. Reading resolved clip insets synchronously avoids
+  // losing all intermediate frames on a low-FPS adapter.
+  const probe = await page.evaluateHandle(
+    (hold) => ({
+      result: new Promise((resolve, reject) => {
+        function measure() {
+          const shell = document.querySelector('#terminal[data-industry-handoff]')
+          const clock = shell?.getAnimations().find((a) => a.animationName === 'dd-industry-handoff')
+          if (!clock) return
+          observer.disconnect()
+          try {
+            const old = shell.querySelector('.hud-leaving[data-from="2"]'),
+              incoming = shell.querySelector('.hud-entering')
+            const line = shell.querySelector('.mode-sweep[data-to="3"] [data-wipe]')
+            const store = old.querySelector('.city-stores').getBoundingClientRect()
+            const dock = incoming.querySelector('.plant-dock').getBoundingClientRect()
+            const source = old.getBoundingClientRect(),
+              destination = incoming.getBoundingClientRect()
+            const style = getComputedStyle(line),
+              samples = []
+            function clip(el, fromBottom) {
+              const path = getComputedStyle(el).clipPath
+              if (!/^inset\([\d. px%]+\)$/.test(path)) throw Error('Unresolved rectangular HUD clip: ' + path)
+              const terms = path.slice(6, -1).split(/\s+/)
+              const token = fromBottom ? (terms[2] ?? terms[0]) : terms[0]
+              const rect = el.getBoundingClientRect()
+              const length = parseFloat(token) * (token.includes('%') ? rect.height / 100 : 1)
+              return fromBottom ? rect.bottom - length : rect.top + length
+            }
+            const duration = Number(clock.effect.getTiming().duration),
+              original = clock.currentTime ?? 0
+            clock.pause()
+            for (const portion of [0.16, 0.32, 0.48, 0.63, 0.78, 0.91]) {
+              clock.currentTime = duration * portion
+              const y = line.getBoundingClientRect().top,
+                oldEdge = clip(old, false),
+                newEdge = clip(incoming, true)
+              const clamped = (v, rect) => Math.min(rect.bottom, Math.max(v, rect.top))
+              const overlap = Math.max(
+                0,
+                Math.min(store.bottom, dock.bottom, newEdge) - Math.max(store.top, dock.top, oldEdge),
+              )
+              samples.push({
+                portion,
+                y,
+                oldEdge,
+                newEdge,
+                sourceError: oldEdge - clamped(y, source),
+                destinationError: newEdge - clamped(y, destination),
+                storeBuildOverlapPx: overlap,
+              })
+            }
+            const middle = samples.reduce((a, b) =>
+              Math.abs(a.y - innerHeight / 2) < Math.abs(b.y - innerHeight / 2) ? a : b,
+            )
+            if (hold) clock.currentTime = duration * middle.portion
+            else {
+              clock.currentTime = original
+              clock.play()
+            }
+            resolve({
+              from: 2,
+              to: 3,
+              name: clock.animationName,
+              duration,
+              viewportHeight: innerHeight,
+              samples,
+              middle,
+              oldInert: old.inert,
+              oldVisible: old.getClientRects().length > 0,
+              tint: style.backgroundColor,
+              height: style.height,
+            })
+          } catch (error) {
+            reject(error)
+          }
+        }
+        const observer = new MutationObserver(measure)
+        observer.observe(document.querySelector('#terminal'), {
+          childList: true,
+          attributes: true,
+          subtree: true,
+        })
+        setTimeout(() => {
+          observer.disconnect()
+          reject(new Error('Industry handoff did not start'))
+        }, 6000)
+      }),
+    }),
+    holdFrame,
+  )
+  try {
+    await page.keyboard.press('3')
+    const cut = await probe.evaluate((h) => h.result)
+    assert.ok(cut.oldInert && cut.oldVisible && cut.height === '1px' && cut.tint === 'rgb(255, 77, 0)')
+    assert.ok(cut.samples.at(-1).y - cut.samples[0].y > cut.viewportHeight * 0.7)
+    for (const [i, s] of cut.samples.entries()) {
+      if (i) assert.ok(s.y > cut.samples[i - 1].y, 'Industry scan must move down')
+      assert.ok(
+        Math.abs(s.sourceError) <= 1.5 && Math.abs(s.destinationError) <= 1.5 && s.storeBuildOverlapPx <= 1.5,
+        'The HUD masks must meet at the orange scanline: ' + JSON.stringify(s),
+      )
+    }
+    return cut
+  } finally {
+    await probe.dispose()
+  }
+}
+
+// This separate small-screen session holds only the browser animation timeline for a staged
+// screenshot. The main gameplay, timing and performance runs always use the normal clock.
+export async function captureIndustryCut(browser, url, outputPath) {
+  const page = await browser.newPage({
+    viewport: { width: 390, height: 844 },
+    deviceScaleFactor: 1,
+    isMobile: true,
+    hasTouch: true,
+  })
+  try {
+    await page.goto(url, { waitUntil: 'networkidle' })
+    await page.locator('#terminal[aria-busy="false"]').waitFor()
+    await page.keyboard.press('2')
+    await page.locator('.mh-city button[data-district="yard"]').waitFor({ state: 'visible' })
+    await page.locator('.mode-sweep').waitFor({ state: 'detached' })
+    const result = await industryCut(page, true)
+    await page.evaluate(
+      () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+    )
+    assert.ok(
+      await page.locator('#terminal[data-industry-handoff]').count(),
+      'Staged handoff should remain visible',
+    )
+    await page.screenshot({ path: outputPath, timeout: 60_000 })
+    return { cut: result, caption: await verifyIndustryCaption(page) }
+  } finally {
+    await page.close()
+  }
 }
 
 export async function verifyModeMotion(page) {
@@ -73,6 +265,10 @@ export async function verifyModeMotion(page) {
   ]) {
     await page.locator('.mode-sweep').waitFor({ state: 'detached' })
     if (from === 2) await page.locator('.mh-city button[data-district="yard"]').waitFor({ state: 'visible' })
+    if (from === 2 && to === 3) {
+      traces.push(await industryCut(page))
+      continue
+    }
     const probe = await page.evaluateHandle(
       ({ from, to }) => ({
         result: new Promise((resolve, reject) => {
@@ -209,6 +405,8 @@ export function watchCombatHUD(page) {
         const seen = {
           hot: 0,
           cold: 0,
+          prelock: 0,
+          prelockReads: [],
           cooldowns: {},
           bonds: new Set(),
           beats: new Set(),
@@ -242,7 +440,37 @@ export function watchCombatHUD(page) {
           const winding = ['sweep', 'slam', 'lunge'].includes(move) && cue !== 'LIVE'
           const visible = !reticle.hidden && reticle.getClientRects().length > 0
           if (visible) {
-            seen.hot++
+            const corner = reticle.querySelector('i'),
+              cornerStyle = getComputedStyle(corner)
+            const stroke = Math.max(
+              ...['borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth'].map((k) =>
+                parseFloat(cornerStyle[k]),
+              ),
+            )
+            if (reticle.dataset.phase === 'prelock') {
+              seen.prelock++
+              const color = getComputedStyle(reticle).color
+              if (
+                !winding ||
+                remaining < 0.2595 ||
+                stroke !== 1 ||
+                color !== 'rgb(113, 104, 100)' ||
+                cue === 'PARRY'
+              )
+                seen.violations.add('prelock appearance')
+              if (!seen.prelockReads.length || remaining !== seen.prelockReads.at(-1).remaining)
+                seen.prelockReads.push({ remaining, color, stroke })
+            } else {
+              seen.hot++
+              if (
+                reticle.dataset.phase !== 'hot' ||
+                !winding ||
+                remaining > 0.2605 ||
+                cue !== 'PARRY' ||
+                stroke !== 3
+              )
+                seen.violations.add('hot appearance')
+            }
             const style = getComputedStyle(reticle),
               bounds = reticle.getBoundingClientRect()
             const corners = [...reticle.querySelectorAll('i')].map((i) => i.getBoundingClientRect())
@@ -269,20 +497,15 @@ export function watchCombatHUD(page) {
             if (Number(style.zIndex) <= Number(getComputedStyle(document.querySelector('.topbar')).zIndex))
               seen.violations.add('reticle behind chrome')
             if (
-              !['rust', 'bone'].includes(reticle.dataset.beat) ||
+              !['rust', 'bone', 'quiet'].includes(reticle.dataset.beat) ||
               !Number.isInteger(Number(reticle.dataset.step))
             )
               seen.violations.add('reticle pulse')
             seen.beats.add(reticle.dataset.beat + ' / ' + reticle.dataset.step)
           } else seen.cold++
           if (
-            visible !== (cue === 'PARRY') ||
-            (visible &&
-              (!winding ||
-                !Number.isFinite(remaining) ||
-                remaining > 0.2605 ||
-                reticle.querySelectorAll('i').length !== 4)) ||
-            (!visible && winding && remaining < 0.2595)
+            visible !== winding ||
+            (visible && (!Number.isFinite(remaining) || reticle.querySelectorAll('i').length !== 4))
           )
             seen.violations.add('parry window')
           seen.bonds.add(text('live-links'))
@@ -309,6 +532,8 @@ export function watchCombatHUD(page) {
           clearTimeout(timeout)
           resolve({
             hot: seen.hot,
+            prelock: seen.prelock,
+            prelockSamples: seen.prelockReads,
             cold: seen.cold,
             beats: [...seen.beats],
             cornerOffsets: seen.cornerOffsets,

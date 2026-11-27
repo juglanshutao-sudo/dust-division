@@ -1,3 +1,4 @@
+import { surveyCamera } from './survey-camera'
 import { ARENA, EXTRACTION, LOCATIONS, type GameState, type GridNode } from './sim'
 
 type P = { x: number; y: number }
@@ -99,6 +100,7 @@ export function createFallback(canvas: HTMLCanvasElement) {
     cos = 1,
     sin = 0,
     up = 1,
+    inverseDistance = 0,
     clock = 0
   let started = false,
     priorHero = true,
@@ -130,9 +132,12 @@ export function createFallback(canvas: HTMLCanvasElement) {
   function projectLocal(x: number, z: number, h = 0): P {
     const dx = x - cx,
       dz = z - cz
+    const across = dx * cos - dz * sin,
+      along = dx * sin + dz * cos
+    const projectedScale = scale / Math.max(0.08, 1 - (along * up + h * pitch) * inverseDistance)
     return {
-      x: midx + (dx * cos - dz * sin) * scale,
-      y: midy + ((dx * sin + dz * cos) * pitch - h * up) * scale,
+      x: midx + across * projectedScale,
+      y: midy + (along * pitch - h * up) * projectedScale,
     }
   }
   function project(x: number, z: number, h = 0) {
@@ -146,7 +151,8 @@ export function createFallback(canvas: HTMLCanvasElement) {
   function pick(x: number, y: number) {
     const a = (x - left - midx) / scale,
       b = (y - top - midy) / (scale * pitch)
-    return { x: cx + cos * a + sin * b, z: cz - sin * a + cos * b }
+    const depth = 1 + b * up * inverseDistance
+    return { x: cx + (cos * a + sin * b) / depth, z: cz + (-sin * a + cos * b) / depth }
   }
   function polygon(points: P[], color: string, stroke?: string, lineWidth = 1) {
     ctx.beginPath()
@@ -366,7 +372,7 @@ export function createFallback(canvas: HTMLCanvasElement) {
         )
       }
     for (const [x, z, w, d] of [
-      [0, -21, 3.2, 63],
+      s.mode === 2 || (s.mode === 3 && !s.raid.active) ? [0, -16, 3.9, 42] : [0, -21, 3.2, 63],
       [0, -22, 76, 3.4],
       [22, -23, 3.4, 47],
       [-18, -40, 48, 2.2],
@@ -685,10 +691,16 @@ export function createFallback(canvas: HTMLCanvasElement) {
       flat = 0.52,
       zoom = Math.min(width / 50, height / 34),
       centerY = 0.56
-    if (construct) {
-      zoom = Math.min(width / 37, height / 27)
-      flat = 0.59
-      angle = 0.64
+    inverseDistance = 0
+    if (s.mode === 2 || construct) {
+      const survey = surveyCamera(construct, width / height)
+      inverseDistance = 1 / survey.distance
+      targetX = survey.x
+      targetZ = survey.z
+      angle = survey.bearing
+      flat = Math.sin(survey.elevation)
+      zoom = height / (2 * survey.distance * Math.tan((survey.fov * Math.PI) / 360))
+      centerY = 0.5
     }
     if (combat) {
       targetX = s.party.x * 0.55 + s.boss.x * 0.45

@@ -1,5 +1,6 @@
 /// <reference types="vite/client" />
 import * as T from 'three'
+import { surveyCamera } from './survey-camera'
 import { createActors } from './actors'
 import { buildArchitecture } from './architecture'
 import { createGeology, terrainHeight, randomSource, noiseGLSL } from './geology'
@@ -105,7 +106,7 @@ export function createWorld(canvas: HTMLCanvasElement) {
   sky.renderOrder = -10
   sky.frustumCulled = false
   envRoot.add(sky)
-  const ground = createGeology(envRoot, software)
+  const { ground, apronDetails } = createGeology(envRoot, software)
   buildArchitecture(envRoot, software)
   // World-space reprojection preserves the original matte at the hero camera while
   // the rock faces and façades acquire parallax as the camera dollies through it.
@@ -394,16 +395,16 @@ export function createWorld(canvas: HTMLCanvasElement) {
       )
       targetAim.set(rx + Math.sin(head) * 3, ry + 1.55, rz + Math.cos(head) * 3)
       fov = 48 + 4 * speed
-    } else if (s.mode === 2) {
-      const help = 1 + Math.max(0, 1.4 - aspect.value) * 0.52
-      targetAim.set(0, 0.4, -22.5)
-      targetEye.set(32 * help, 39 * help, 12 * help - 14)
-      fov = 43
-    } else if (s.mode === 3 && !s.raid.active) {
-      const help = 1 + Math.max(0, 1.35 - aspect.value) * 0.78
-      targetAim.set(0, 0.1, -22)
-      targetEye.set(18 * help, 28 * help, -22 + 25 * help)
-      fov = 42
+    } else if (s.mode === 2 || (s.mode === 3 && !s.raid.active)) {
+      const survey = surveyCamera(s.mode === 3, aspect.value)
+      targetAim.set(survey.x, 0, survey.z)
+      const horizontal = Math.cos(survey.elevation) * survey.distance
+      targetEye.set(
+        survey.x + Math.sin(survey.bearing) * horizontal,
+        Math.sin(survey.elevation) * survey.distance,
+        survey.z + Math.cos(survey.bearing) * horizontal,
+      )
+      fov = survey.fov
     } else {
       const a = s.party
       const fight = s.mode === 4
@@ -476,7 +477,9 @@ export function createWorld(canvas: HTMLCanvasElement) {
     post.uniforms.focusDistance.value = eye.distanceTo(aim)
     const plateOnly = isHero && photoReady && transition < 0.016
     heroBackdrop.visible = plateOnly
-    for (const item of staticEnvironment) item.visible = !plateOnly
+    const overheadSurvey = s.mode === 2 || (s.mode === 3 && !s.raid.active)
+    for (const item of staticEnvironment)
+      item.visible = !plateOnly && !(overheadSurvey && item === apronDetails)
     // The parked vehicle is a rigid, fully lit asset. Preserve its completed
     // color and depth until its projection or light changes by a visible amount.
     const surveyed =

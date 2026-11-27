@@ -87,12 +87,28 @@ export function createGeology(scene: T.Scene, lowDetail = false) {
   ground.receiveShadow = true
   scene.add(ground)
 
+  // The southern approach is the open foreground of the two district surveys.
+  // Keep its decorative detail in a separate batch from the other basin sectors.
+  const apronDetails = new T.Group()
+  scene.add(apronDetails)
+  const sectors = [scene, apronDetails].map((parent) => ({
+    parent,
+    cliffs: [] as number[],
+    cliffColors: [] as number[],
+    grass: [] as number[],
+    grassColors: [] as number[],
+    stones: [] as { matrix: T.Matrix4; color: T.Color }[],
+  }))
+  function sector(x: number, z: number, extentX = 0, extentZ = 0) {
+    const overlapsApron = x + extentX > -50 && x - extentX < 55 && z + extentZ > 1 && z - extentZ < 61
+    return sectors[overlapsApron ? 1 : 0]
+  }
   // Irregular geological beds share their exposed edges with the cap above.
-  const verts: number[] = [],
-    colors: number[] = []
   const cliffMaterial = textured('#ffffff', true, lowDetail)
   cliffMaterial.side = T.DoubleSide
-  function flushCliffs() {
+  function flushCliffs(batch: (typeof sectors)[number]) {
+    const verts = batch.cliffs,
+      colors = batch.cliffColors
     if (!verts.length) return
     const geo = new T.BufferGeometry()
     geo.setAttribute('position', new T.Float32BufferAttribute(verts, 3))
@@ -101,7 +117,7 @@ export function createGeology(scene: T.Scene, lowDetail = false) {
     geo.computeBoundingSphere()
     const mesh = new T.Mesh(geo, cliffMaterial)
     mesh.receiveShadow = true
-    scene.add(mesh)
+    batch.parent.add(mesh)
     verts.length = 0
     colors.length = 0
   }
@@ -111,10 +127,6 @@ export function createGeology(scene: T.Scene, lowDetail = false) {
       ['#867d70', '#a59681', '#c2ad8c', '#c9b69a', '#a89982', '#dac5a4'],
       ['#887e6e', '#9f8b6b', '#ba9d79', '#a59273', '#cfb38d', '#d2ba97'],
     ]
-  const vertex = (v: number[], c: T.Color) => {
-    verts.push(v[0], v[1], v[2])
-    colors.push(c.r, c.g, c.b)
-  }
   function mesa(
     cx: number,
     cz: number,
@@ -124,6 +136,11 @@ export function createGeology(scene: T.Scene, lowDetail = false) {
     shape: number,
     palette: string[],
   ) {
+    const batch = sector(cx, cz, rx * 1.3, rz * 1.3)
+    function vertex(v: number[], c: T.Color) {
+      batch.cliffs.push(v[0], v[1], v[2])
+      batch.cliffColors.push(c.r, c.g, c.b)
+    }
     const count = Math.round((16 + rx * 0.45) * (lowDetail ? 0.62 : 1)),
       rings: number[][][] = []
     const cuts = lowDetail
@@ -170,7 +187,7 @@ export function createGeology(scene: T.Scene, lowDetail = false) {
     const r = rings[rings.length - 1]
     for (let j = 0; j < count; j++)
       for (const v of [[cx, bottom + top, cz], r[(j + 1) % count], r[j]]) vertex(v, tone)
-    if (lowDetail) flushCliffs()
+    if (lowDetail) flushCliffs(batch)
   }
   for (let i = 0; i < (lowDetail ? 42 : 67); i++) {
     const a = (i / (lowDetail ? 42 : 67)) * Math.PI * 2,
@@ -188,17 +205,17 @@ export function createGeology(scene: T.Scene, lowDetail = false) {
     [-13, -95, 17, 12, 14],
   ])
     mesa(x, z, rx, rz, h, random() * 8, rangePalettes[1])
-  flushCliffs()
+  sectors.forEach(flushCliffs)
 
   // Scree and low desert brush. Clustered distribution leaves vehicle paths clear.
   const dummy = new T.Object3D(),
     stoneColors = ['#716d5f', '#8c816a', '#b2a189', '#686458', '#c8b59a']
-  const stones = new T.InstancedMesh(
-    lowDetail ? new T.IcosahedronGeometry(1, 0) : new T.DodecahedronGeometry(1, 0),
-    lowDetail ? new T.MeshLambertMaterial() : new T.MeshStandardMaterial({ roughness: 1, flatShading: true }),
-    lowDetail ? 235 : 1250,
-  )
-  for (let i = 0; i < stones.count; i++) {
+  const stoneGeometry = lowDetail ? new T.IcosahedronGeometry(1, 0) : new T.DodecahedronGeometry(1, 0)
+  const stoneMaterial = lowDetail
+    ? new T.MeshLambertMaterial()
+    : new T.MeshStandardMaterial({ roughness: 1, flatShading: true })
+  const stoneCount = lowDetail ? 235 : 1250
+  for (let i = 0; i < stoneCount; i++) {
     const x = (random() - 0.5) * 169,
       z = (random() - 0.5) * 146 - 20
     let size = 0.065 + random() ** 3 * 0.75
@@ -208,13 +225,20 @@ export function createGeology(scene: T.Scene, lowDetail = false) {
     dummy.scale.set(size * (1 + random()), size * (0.34 + random() * 0.4), size)
     dummy.rotation.set(random() * 0.3, random() * 6.28, random() * 0.4)
     dummy.updateMatrix()
-    stones.setMatrixAt(i, dummy.matrix)
-    stones.setColorAt(i, tone.set(stoneColors[i % 5]))
+    sector(x, z, size * 2, size * 2).stones.push({
+      matrix: dummy.matrix.clone(),
+      color: new T.Color(stoneColors[i % 5]),
+    })
   }
-  stones.receiveShadow = true
-  scene.add(stones)
-  const grass: number[] = [],
-    grassColors: number[] = []
+  for (const batch of sectors) {
+    const stones = new T.InstancedMesh(stoneGeometry, stoneMaterial, batch.stones.length)
+    batch.stones.forEach((entry, i) => {
+      stones.setMatrixAt(i, entry.matrix)
+      stones.setColorAt(i, entry.color)
+    })
+    stones.receiveShadow = true
+    batch.parent.add(stones)
+  }
   for (let i = 0; i < (lowDetail ? 285 : 875); i++) {
     const x = (random() - 0.5) * 120,
       z = (random() - 0.5) * 111 - 14
@@ -224,6 +248,7 @@ export function createGeology(scene: T.Scene, lowDetail = false) {
       (x > 26 && x < 48 && z < -13 && z > -42)
     )
       continue
+    const { grass, grassColors } = sector(x, z, 0.4, 0.4)
     const y = terrainHeight(x, z),
       height = 0.13 + random() * 0.37
     const c = new T.Color(i % 3 === 0 ? '#807755' : '#a99967')
@@ -247,10 +272,13 @@ export function createGeology(scene: T.Scene, lowDetail = false) {
       for (let k = 0; k < 3; k++) grassColors.push(c.r, c.g, c.b)
     }
   }
-  const gr = new T.BufferGeometry()
-  gr.setAttribute('position', new T.Float32BufferAttribute(grass, 3))
-  gr.setAttribute('color', new T.Float32BufferAttribute(grassColors, 3))
-  gr.computeVertexNormals()
-  scene.add(new T.Mesh(gr, new T.MeshLambertMaterial({ side: T.DoubleSide, vertexColors: true })))
-  return ground
+  const grassMaterial = new T.MeshLambertMaterial({ side: T.DoubleSide, vertexColors: true })
+  for (const batch of sectors) {
+    const gr = new T.BufferGeometry()
+    gr.setAttribute('position', new T.Float32BufferAttribute(batch.grass, 3))
+    gr.setAttribute('color', new T.Float32BufferAttribute(batch.grassColors, 3))
+    gr.computeVertexNormals()
+    batch.parent.add(new T.Mesh(gr, grassMaterial))
+  }
+  return { ground, apronDetails }
 }

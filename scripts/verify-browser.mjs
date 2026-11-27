@@ -6,9 +6,12 @@ import { tmpdir } from 'node:os'
 import { extname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import { verifyTitleGround } from './verify-title-ground.mjs'
 import {
   verifyOverworldChrome,
   verifyModeMotion,
+  verifyIndustryCaption,
+  captureIndustryCut,
   watchCombatHUD,
   verifySecuredCoreActions,
 } from './verify-motion.mjs'
@@ -78,6 +81,7 @@ const report = {
   requestErrors: [],
   renderErrors: [],
   pixelChecks: [],
+  titleGround: [],
 }
 let browser,
   page,
@@ -270,6 +274,9 @@ async function verifyLowTier() {
 }
 async function capture(name) {
   await checkScenePixels(name)
+  if (name === '03-city' || name === '04-industry') {
+    report.titleGround.push(await verifyTitleGround(page, name, output))
+  }
   const timing = await sampleFrames()
   const hudFps = await page.locator('#frame-data').innerText()
   await page.screenshot({ path: join(output, name + '.png'), timeout: 60_000 })
@@ -404,6 +411,7 @@ try {
     await page.keyboard.press('Enter')
     await button('E4 · Generator').waitFor()
     await waitUI('[data-ui="supply"]', 'contains', '16 MW')
+    report.industryCaption = await verifyIndustryCaption(page)
     await capture('04-industry')
     await verifyLowTier()
     await button('Remove').click()
@@ -509,7 +517,7 @@ try {
     report.combatHud = hud
     console.log('COMBAT HUD', JSON.stringify(hud))
     assert.deepEqual(hud.violations, [])
-    assert.ok(hud.hot > 0 && hud.cold > 0 && hud.bonds.includes('Induction / Line'))
+    assert.ok(hud.hot > 0 && hud.prelock > 0 && hud.cold > 0 && hud.bonds.includes('Induction / Line'))
     assert.ok(
       hud.cooldowns.parry?.length >= 2 && hud.cooldowns.attack?.length >= 1,
       'Cooldown bars must track live timers',
@@ -599,6 +607,11 @@ try {
     await button('Export JSON').waitFor()
     assert.match(await page.locator('.sample-result').innerText(), /FPS · P95/)
     await button('Close dialog').click()
+  })
+  await check('Staged the synchronized city-to-industry cut at phone width', async () => {
+    const url = page.url()
+    await page.close()
+    report.stagedIndustry = await captureIndustryCut(browser, url, join(output, '10-industry-handoff.png'))
   })
   await check('Rendered all scenes without console, shader, runtime or asset errors', async () => {
     assert.equal(report.pageErrors.length, 0, JSON.stringify(report.pageErrors))
