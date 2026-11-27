@@ -89,7 +89,7 @@ function surfaceAtlas(){
   }
   const tex=new T.DataTexture(pix,n,n);tex.wrapS=tex.wrapT=T.RepeatWrapping;tex.magFilter=T.LinearFilter;tex.minFilter=T.LinearMipmapLinearFilter;tex.generateMipmaps=true;tex.needsUpdate=true;return tex;
 }
-function materials(atlas:T.Texture) {
+function materials(atlas:T.Texture,landscape?:{value:T.Texture}) {
   const std=(roughness:number,metalness:number) => new T.MeshStandardMaterial({vertexColors:true,roughness,metalness});
   const finish=(m:T.MeshStandardMaterial,strength:number)=>{
     m.customProgramCacheKey=()=>`field-finish-${strength}`;
@@ -101,18 +101,25 @@ function materials(atlas:T.Texture) {
         vec3 f=(texture2D(finishAtlas,finishP.zy*.76).rgb*nw.x+texture2D(finishAtlas,finishP.xz*.76).rgb*nw.y+texture2D(finishAtlas,finishP.xy*.76).rgb*nw.z);
         float facingUp=max(0.,finishN.y);float patina=smoothstep(.41,.71,f.r);
         diffuseColor.rgb*=.89+.17*f.g+.13*f.r;
-        diffuseColor.rgb=mix(diffuseColor.rgb,vec3(.31,.259,.163),patina*(.055+.073*facingUp));
+        float groundDust=1.-smoothstep(.3,1.75,finishP.y);
+        diffuseColor.rgb=mix(diffuseColor.rgb,vec3(.31,.234,.136),patina*(.051+.082*facingUp+.095*groundDust));
         diffuseColor.rgb=mix(diffuseColor.rgb,vec3(.212,.193,.147),f.b*${strength.toFixed(2)});
       `);
     };return m;
   };
   const glass=std(.24,.31);
   glass.onBeforeCompile=sh=>{
+    sh.uniforms.surveySky=landscape??{value:atlas};
     sh.vertexShader='varying vec3 windowPos;varying vec3 windowNorm;\n'+sh.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\nwindowPos=(modelMatrix*vec4(position,1.)).xyz;windowNorm=normalize(mat3(modelMatrix)*normal);');
-    sh.fragmentShader='varying vec3 windowPos; varying vec3 windowNorm;\n'+sh.fragmentShader.replace('#include <color_fragment>',`#include <color_fragment>
-      vec3 sight=normalize(windowPos-cameraPosition);vec3 reflection=reflect(sight,normalize(windowNorm));
-      float horizon=smoothstep(-.19,.26,reflection.y);float fresnel=pow(1.-clamp(abs(dot(sight,normalize(windowNorm))),0.,1.),2.);
-      diffuseColor.rgb+=mix(vec3(.004,.004,.002),vec3(.057,.069,.057),horizon)*(.32+.69*fresnel);`);
+    sh.fragmentShader='varying vec3 windowPos;varying vec3 windowNorm;uniform sampler2D surveySky;\n'+sh.fragmentShader.replace('#include <opaque_fragment>',`
+      vec3 sight=normalize(windowPos-cameraPosition),N=normalize(windowNorm),reflection=reflect(sight,N);
+      float fresnel=pow(1.-clamp(abs(dot(sight,N)),0.,1.),2.);
+      vec2 reflectedUV=vec2(.49+atan(reflection.x,reflection.z)*.135,.49+reflection.y*.25);
+      vec3 mesaReflection=texture2D(surveySky,clamp(reflectedUV,vec2(.025),vec2(.975))).rgb*vec3(.57,.68,.69);
+      float horizon=smoothstep(-.045,.42,reflection.y);float layer=smoothstep(.023,.075,abs(reflection.y-.26-.07*sin(reflection.x*12.)));
+      vec3 laminated=mix(vec3(.010,.018,.021),mesaReflection,(.43+.40*horizon)*(.64+.36*layer));
+      outgoingLight=mix(outgoingLight,laminated,.48+.43*fresnel);
+      #include <opaque_fragment>`);
   };
   return [finish(std(.67,.22),.55),finish(std(.50,.49),.39),finish(std(.95,.015),.12),glass,
     new T.MeshBasicMaterial({vertexColors:true}),new T.MeshBasicMaterial({vertexColors:true})];
@@ -157,6 +164,9 @@ function decalTexture() {
   c.save(); c.beginPath(); c.rect(26,223,378,75);c.clip();
   for(let i=-2;i<10;i++){c.beginPath(); c.moveTo(26+i*60,223); c.lineTo(51+i*60,223); c.lineTo(97+i*60,298);c.lineTo(72+i*60,298);c.fill();}c.restore();
   c.fillStyle='#e4dbbc'; c.font='bold 40px monospace'; c.fillText('A—07',550,245);
+  c.fillStyle='#d9cca5';c.fillRect(539,337,304,71);c.fillStyle='#34342b';
+  c.font='bold 22px monospace';c.fillText('FIELD INSPECTION',549,363);c.fillRect(550,374,283,3);
+  c.font='bold 15px monospace';c.fillText('07 / 6148    AXLE GROUP 3',549,398);
   c.fillStyle='#272a24'; c.fillRect(20,348,375,88);c.fillStyle='#ddd7bf';c.font='bold 25px monospace'; c.fillText('LIFT POINT',36,382);c.fillRect(36,398,328,5);c.font='bold 16px monospace';c.fillText('GVW  8.15 T    GRP / 07',36,424);
   const t=new T.CanvasTexture(canvas); t.colorSpace=T.SRGBColorSpace; t.anisotropy=4; return t;
 }
@@ -263,11 +273,36 @@ function makeRover(mats:T.Material[],stencil:T.Material) {
   p.rod([-.64,1.89,1.25],[-.64,1.89,2.40],.191,'#756e4b','metal',12);
   for(const z of [1.45,2.23])p.rod([-.64,1.89,z-.026],[-.64,1.89,z+.026],.198,carbon,'rubber',12);
   for(const side of [-1,1]) {
-    const x=side*1.241;
-    const panel:V[]=side>0?[[x,1.02,.62],[x,1.02,-.89],[x,1.413,-.89],[x,1.413,.62]]:[[x,1.02,-.89],[x,1.02,.62],[x,1.413,.62],[x,1.413,-.89]];
-    // Outboard stencil plate placed just proud of waist, below glazing.
-    for(const corner of panel)corner[0]=side*1.254;
-    decal(body,stencil,panel,[0,0,794,184]);
+    // Door stampings rise above the bogie lip so the identification survives a low view.
+    const panelX=(y:number)=>side*(1.260-Math.max(0,y-1.51)*.615);
+    const panelPoint=(y:number,z:number,lift=0):V=>[panelX(y)+side*lift,y,z];
+    const sill=[panelPoint(1.319,-1.33),panelPoint(1.32,.55),panelPoint(1.50,.67),panelPoint(1.50,-1.42)];
+    const plate=[panelPoint(1.51,-1.42),panelPoint(1.51,.67),panelPoint(1.692,.58),panelPoint(1.692,-1.28)];
+    p.polygon(sill,'#ac7d32','paint',[side,0,0]);p.polygon(plate,'#bb8c3c','paint',[side,0,0]);
+    for(const [z1,z2] of [[-1.42,-1.28],[-.08,-.08],[.67,.58]]) {
+      p.rod(panelPoint(1.506,z1,.004),panelPoint(1.697,z2,.004),.012,'#514938','metal',5);
+    }
+    for(const z of [-1.22,.49]){
+      p.rod(panelPoint(1.548,z,.003),panelPoint(1.548,z,.022),.030,steel,'metal',6);
+      p.rod(panelPoint(1.60,z,.003),panelPoint(1.60,z,.019),.016,silver,'metal',6);
+    }
+    const zLow=side>0?.44:-1.13,zHigh=side>0?-1.13:.44;
+    decal(body,stencil,[panelPoint(1.521,zLow,.012),panelPoint(1.521,zHigh,.012),panelPoint(1.679,zHigh,.012),panelPoint(1.679,zLow,.012)],[0,9,794,162]);
+    // Rubbed leading edges and two hull alignment marks follow the actual sheet metal.
+    for(const z of wheelZ) {
+      const outer=side*1.532;
+      p.polygon([[outer,1.348,z-.32],[outer,1.35,z+.008],[outer,1.334,z-.17],[outer,1.329,z-.28]],'#a19373','metal',[side,0,0]);
+      p.polygon([[outer,1.349,z+.16],[outer,1.348,z+.23],[outer,1.339,z+.197]],'#b1a180','metal',[side,0,0]);
+    }
+    const hoodMark=(x:number,z:number):V=>[side*x,1.424+(z+2.82)*.470,z];
+    for(let j=0;j<2;j++) {
+      const offset=j*.109;
+      p.polygon([hoodMark(.66+offset,-2.70),hoodMark(.72+offset,-2.70),hoodMark(.76+offset,-2.41),hoodMark(.70+offset,-2.41)],'#dfd7ad','paint',[0,1,-1]);
+    }
+    p.box([side*.955,1.703,1.85],[.025,.259,1.02],carbon,[0,0,0],'metal');
+    for(let i=0;i<8;i++)p.box([side*.972,1.707,1.42+i*.123],[.026,.189,.038],'#9b8b64',[-.28,0,0],'metal');
+    const labelFace=side*.969;
+    decal(body,stencil,[[labelFace,1.609,1.93],[labelFace,1.609,2.43],[labelFace,1.723,2.43],[labelFace,1.723,1.93]],[539,337,304,71]);
     const xx=side*1.306, z1=.80,z2=1.31;
     decal(body,stencil,[[xx,1.23,z1],[xx,1.23,z2],[xx,1.36,z2],[xx,1.36,z1]],[21,345,378,93]);
     for(const z of [-2.18,-1.63,-.68,.45,1.12,2.29])p.rod([side*1.235,1.38,z],[side*1.255,1.38,z],.024,silver,'metal',6);
@@ -279,6 +314,10 @@ function makeRover(mats:T.Material[],stencil:T.Material) {
   p.rod([-.95,3.48,.68],[-.952,3.54,.69],.025,'#ad5e22');
   p.rod([.87,1.72,2.39],[.98,2.96,2.62],.016,black,'metal',6,.006);
   p.polygon([[.972,2.85,2.596],[.978,2.93,2.609],[1.01,2.854,2.89]],'#a25a2f','paint');
+  // Every body marking is static in the same local coordinate frame.
+  const labels=body.children.filter((o):o is T.Mesh<T.BufferGeometry>=>o instanceof T.Mesh&&o.material===stencil);
+  const mergedLabels=mergeGeometries(labels.map(label=>label.geometry));
+  if(mergedLabels){for(const label of labels){label.removeFromParent();label.geometry.dispose();}body.add(new T.Mesh(mergedLabels,stencil));}
   p.finish(body);
   const template=makeWheel(mats), wheels:T.Group[]=[];
   for(const z of wheelZ) for(const side of [-1,1]) {
@@ -287,7 +326,7 @@ function makeRover(mats:T.Material[],stencil:T.Material) {
   return {g,body,wheels};
 }
 
-const rust='#984b35', oxidized='#654840', ash='#b4aba0', iron='#453f3d', core='#f66c48';
+const rust='#984b35', oxidized='#654840', ash='#b4aba0', iron='#453f3d', core='#ff764a';
 function makeColossus(mats:T.Material[],stencil:T.Material) {
   const g=new T.Group(), housing=new T.Group(), head=new T.Group(), p=new Parts(mats);g.add(housing);housing.add(head);
   // A retired walking kiln with an annular pressure vessel and a forward-looking survey head.
@@ -431,16 +470,16 @@ function makeDust() {
   return {points,tick};
 }
 
-export function createActors(scene:T.Scene,terrainHeight:(x:number,z:number)=>number) {
+export function createActors(scene:T.Scene,terrainHeight:(x:number,z:number)=>number,landscape?:{value:T.Texture}) {
   const all=new T.Group();all.name='Field Division';scene.add(all);
-  const finishMap=surfaceAtlas(), mats=materials(finishMap), atlas=decalTexture(), contactMap=softMask();
+  const finishMap=surfaceAtlas(), mats=materials(finishMap,landscape), atlas=decalTexture(), contactMap=softMask();
   const stencil=new T.MeshStandardMaterial({map:atlas,roughness:.86,transparent:true,alphaTest:.38,side:T.DoubleSide,polygonOffset:true,polygonOffsetFactor:-2});
   const vehicle=makeRover(mats,stencil), colossus=makeColossus(mats,stencil);
   const squad=[0,1,2].map(id=>makeOperator(mats,id));
   const rover=vehicle.g,boss=colossus.g;rover.name='R-07 Longhaul';boss.name='Kiln Warden';all.add(rover,boss,...squad.map(op=>op.g));
   const vehicleContact=contact(4.7,8.1,contactMap);vehicleContact.position.y=.022;rover.add(vehicleContact);
-  const bossContact=contact(8.8,8.2,contactMap);bossContact.position.y=.03;boss.add(bossContact);
-  for(const op of squad){const shadow=contact(1.15,1.29,contactMap);shadow.position.y=.025;op.g.add(shadow);}
+  const bossContact=contact(8.8,8.2,contactMap);bossContact.position.y=.03;bossContact.material.opacity=.55;boss.add(bossContact);
+  for(const op of squad){const shadow=contact(1.15,1.29,contactMap);shadow.position.y=.025;shadow.material.opacity=.53;op.g.add(shadow);}
   const arc=slashMesh();all.add(arc);
   const lines=new T.Group();all.add(lines);
   const warningMaterial=new T.MeshBasicMaterial({color:'#ce5a43',transparent:true,opacity:.8,side:T.DoubleSide,depthWrite:false});
@@ -474,6 +513,7 @@ export function createActors(scene:T.Scene,terrainHeight:(x:number,z:number)=>nu
   const guard=new T.Mesh(new T.TorusGeometry(.63,.018,5,40,Math.PI*1.5),new T.MeshBasicMaterial({color:ivory,transparent:true,opacity:.82,depthWrite:false}));all.add(guard);
   const pulse=new T.Mesh(new T.RingGeometry(.966,1,96),warningMaterial.clone());pulse.rotation.x=-Math.PI/2;all.add(pulse);
   const dust=makeDust();all.add(dust.points);
+  let squadVisible=false;
   let time=0, wheelRoll=0,lastSpeed=0, lastX=NaN,lastZ=0,stride=0,partyTravel=0,lastBX=NaN,lastBZ=0,bossStride=0,bossTravel=0;
   function update(dt:number,s:GameState){
     time+=dt;
@@ -499,14 +539,21 @@ export function createActors(scene:T.Scene,terrainHeight:(x:number,z:number)=>nu
     partyTravel=mix(partyTravel,T.MathUtils.clamp(Math.hypot(dx,dz)/Math.max(.001,dt),0,6),1-Math.exp(-dt*12));
     stride+=dt*(4+partyTravel*2.2);lastX=a.x;lastZ=a.z;
     const dir=Math.sin(a.heading), forward=Math.cos(a.heading);
-    const formation=a.formation.filter(id=>id!==a.active);
+    const cells=a.positions;
+    const leaderCell=cells[a.active];
     for(let id=0;id<squad.length;id++) {
       const op=squad[id];op.g.visible=partyVisible;if(!partyVisible)continue;
-      const active=id===a.active, flank=active?0:formation.indexOf(id)===0?-1:1;
-      const xx=a.x+flank*1.25*forward-(active?0:1.24)*dir, zz=a.z-flank*1.25*dir-(active?0:1.24)*forward;
-      const beat=Math.sin(stride+id*1.1), amp=Math.min(.52,partyTravel*.11);
+      const active=id===a.active,cell=cells[id];
+      const right=(cell%3-leaderCell%3)*1.35,front=(Math.floor(leaderCell/3)-Math.floor(cell/3))*1.40;
+      const targetX=a.x+right*forward+front*dir,targetZ=a.z-right*dir+front*forward;
+      const distance=Math.hypot(targetX-op.g.position.x,targetZ-op.g.position.z);
+      const blend=active||!squadVisible||distance>8?1:1-Math.exp(-dt*8.8);
+      const xx=mix(op.g.position.x,targetX,blend),zz=mix(op.g.position.z,targetZ,blend);
+      const catchup=(!active&&squadVisible)?Math.min(4.8,distance*5):0;
+      const beat=Math.sin(stride+id*1.1),amp=Math.min(.52,Math.max(partyTravel,catchup)*.11);
       op.g.position.set(xx,terrainHeight(xx,zz)+Math.abs(beat)*amp*.07,zz);
-      op.g.rotation.y=a.heading+Math.PI;
+      const yawError=a.heading+Math.PI-op.g.rotation.y;
+      op.g.rotation.y+=Math.atan2(Math.sin(yawError),Math.cos(yawError))*(active||!squadVisible?1:1-Math.exp(-dt*12));
       op.torso.rotation.z=active?fx.dodge*.23:0;
       op.torso.rotation.x=active?-.11*fx.attack-.19*fx.parry:0;
       op.torso.rotation.y=active?Math.sin(fx.attack*Math.PI*1.35)*.52:0;
@@ -516,6 +563,7 @@ export function createActors(scene:T.Scene,terrainHeight:(x:number,z:number)=>nu
         op.arms[i].rotation.z=alt*.08-(active&&i===1?Math.sin(Math.PI*fx.attack)*.85:0);
       }
     }
+    squadVisible=partyVisible;
     const dead=arena.stage==='dead', broken=arena.stage==='broken', warned=arena.stage==='windup';
     boss.visible=partyVisible;
     boss.position.set(arena.x,terrainHeight(arena.x,arena.z),arena.z);

@@ -71,7 +71,7 @@ function raid() {
     <div class="mh-tr raid-cargo"><p class="mh-cap">Unbanked cargo</p><strong data-ui="loot"></strong><span>ALLOY</span></div>
     <div class="mh-loot" data-ui="loot-pins"></div>
     <div class="mh-bl"><button class="raid-action" data-command="prepare">${icon('warning')}Engage warden</button></div>
-    <div class="mh-br raid-exit"><p class="mh-cap" data-ui="evac-range"></p><button class="raid-action" data-command="extract">${icon('beacon')}<span data-ui="evac"></span></button></div>
+    <div class="mh-br raid-exit"><p class="mh-cap evac-course"><span data-ui="evac-range"></span><b data-ui="evac-bearing"></b></p><button class="raid-action" data-command="extract">${icon('beacon')}<span data-ui="evac"></span></button></div>
   </section>`;
 }
 
@@ -82,7 +82,17 @@ function battle() {
     <div class="mh-tr battle-scope" data-ui="scope"><div class="scope-head mh-cap"><span>Telemetry</span><span data-ui="phase"></span></div>
     <svg viewBox="0 0 220 42" preserveAspectRatio="none" aria-hidden="true"><path class="scope-grid" stroke-dasharray="1 4" d="M0 6H220M0 21H220M0 36H220"/><path class="scope-wave" data-ui="scope-path"/></svg>
     <p class="scope-move"><span data-ui="boss-move"></span><small data-ui="boss-window"></small></p></div>
-    <div class="mh-bl battle-roster"><div class="squad-caption"><span class="mh-cap" data-ui="squad-label"></span><span class="bond-label" data-ui="bond"></span></div>
+    <div class="mh-bl battle-roster">
+    <div class="formation-plan" data-ui="formation-plan">
+      <div class="formation-tiles" role="group" aria-label="Deployment board, three by three">
+        ${Array.from({length:9}, (_,i) => `<button class="formation-tile" type="button" data-tile="${i}"></button>`).join('')}
+      </div>
+      <div class="formation-readout" title="Line · three aligned cells. Wedge · one operator adjacent to both allies. Dispersed · separated cells.">
+        <p class="mh-cap">Formation</p><strong data-ui="link-style"></strong><span data-ui="link-effect"></span>
+        <small data-ui="tile-help"></small>
+      </div>
+    </div>
+    <div class="squad-caption"><span class="mh-cap" data-ui="squad-label"></span><span class="bond-label" data-ui="bond"></span></div>
     <div class="squad-slots" role="group" aria-label="Squad formation">${[0,1,2].map(i => `<button class="squad-slot" data-slot="${i}"><span data-ui="slot-icon-${i}" style="display:contents"></span><strong data-ui="name-${i}"></strong><small data-ui="element-${i}"></small></button>`).join('')}</div>
     <div class="squad-health"><span class="mh-cap" data-ui="squad-information"></span><progress data-ui="party-bar" max="100" value="100" aria-label="Squad integrity"></progress></div></div>
     <div class="mh-br battle-actions"><button class="battle-deploy" data-command="raid">Launch incursion ${icon('uplink')}</button>
@@ -252,6 +262,8 @@ export function createModes(container: HTMLElement, game: Game, project: Project
     bars('raid-bars', r.timeLeft/110);
     write('loot', r.loot);
     const range = Math.hypot(s.party.x - EXTRACTION.x, s.party.z - EXTRACTION.z);
+    const bearing = (Math.atan2(EXTRACTION.x - s.party.x, s.party.z - EXTRACTION.z) * 180 / Math.PI + 360) % 360;
+    write('evac-bearing', String(Math.round(bearing)%360).padStart(3, '0')+'°');
     write('evac-range', r.extraction >= 0 ? 'Hold position' : Math.ceil(range) + ' m / Landing zone');
     write('evac', r.extraction >= 0 ? 'Uplink ' + Math.max(0,r.extraction).toFixed(1) + ' s' : r.evacuating ? 'Beacon active' : 'Call extraction');
     element<HTMLButtonElement>('.raid-exit button').disabled = r.evacuating;
@@ -294,6 +306,26 @@ export function createModes(container: HTMLElement, game: Game, project: Project
       }
       attr(field('scope-path'),'d',points.join(''));
     }
+    field('formation-plan').hidden = live;
+    if (!live) {
+      const effects = {Line:'+8% strike damage',Wedge:'+12% stagger',Dispersed:'−15% damage taken'};
+      write('link-style',p.linkStyle);
+      write('link-effect',effects[p.linkStyle]);
+      write('tile-help','Place ' + CREW[p.active].name + ' on a tile');
+      for (let i=0; i<9; i++) {
+        const tile = element<HTMLButtonElement>('[data-tile="' + i + '"]');
+        const occupant = p.positions.indexOf(i);
+        if (tile.dataset.crew !== String(occupant)) {
+          tile.dataset.crew = String(occupant);
+          tile.innerHTML = occupant < 0 ? '' : icon('crew' + occupant);
+        }
+        const coordinate = cellName(i % 3,Math.floor(i / 3));
+        const action = occupant < 0 ? 'Place ' + CREW[p.active].name : occupant === p.active ? CREW[occupant].name + ' deployed' : 'Swap ' + CREW[p.active].name + ' with ' + CREW[occupant].name;
+        attr(tile,'aria-label',coordinate + ' · ' + action);
+        attr(tile,'title',coordinate + ' · ' + action);
+        attr(tile,'aria-pressed',String(occupant === p.active));
+      }
+    }
     write('squad-label', live ? 'Squad channel' : 'Lead operator');
     write('bond', p.bond);
     const bonds: Record<string,string> = {Bulwark:'Extended parry',Induction:'Arc resonance',Overpressure:'Stagger bonus'};
@@ -333,8 +365,9 @@ export function createModes(container: HTMLElement, game: Game, project: Project
     if (!(e.target instanceof Element)) return;
     const el = e.target.closest<HTMLElement>('[data-cell], button');
     if (!el || !root.contains(el)) return;
-    const {cell,district,kind,cache: id,slot,command} = el.dataset;
+    const {cell,tile,district,kind,cache: id,slot,command} = el.dataset;
     if (cell !== undefined) activateCell(Number(cell));
+    else if (tile !== undefined) game.act('position',{operator:game.state.party.active,cell:Number(tile)});
     else if (district) game.act('district',district);
     else if (kind) { selectedCell = -1; game.act('selectBuild',kind as Kind); }
     else if (id) game.act('salvage',id);

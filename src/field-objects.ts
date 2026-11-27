@@ -28,6 +28,11 @@ export function createFieldObjects(scene:T.Scene){
   }
   let models=new T.Group(),signature='',flowLinks:{ax:number;az:number;bx:number;bz:number;cargo:boolean}[]=[];root.add(models);
   const packets=new T.InstancedMesh(box,new T.MeshBasicMaterial({color:'#a9f3a8'}),320);packets.count=0;packets.frustumCulled=false;root.add(packets);
+  const flowDepth={value:null as T.DepthTexture|null},flowResolution={value:new T.Vector2(1,1)},flowOverlay={value:false};
+  packets.layers.set(1);packets.material.onBeforeCompile=shader=>{
+    Object.assign(shader.uniforms,{flowDepth,flowResolution,flowOverlay});
+    shader.fragmentShader=`uniform sampler2D flowDepth;uniform vec2 flowResolution;uniform bool flowOverlay;\n`+shader.fragmentShader.replace('#include <alphatest_fragment>',`#include <alphatest_fragment>\nif(flowOverlay&&gl_FragCoord.z>texture2D(flowDepth,gl_FragCoord.xy/flowResolution).r+.00004)discard;`);
+  };
   const plane=new T.PlaneGeometry(21,21,7,7);plane.rotateX(-Math.PI/2);
   const pad=plane.attributes.position;for(let i=0;i<pad.count;i++)pad.setY(i,terrainHeight(pad.getX(i),pad.getZ(i)-22)+.08);
   const gridMat=new T.ShaderMaterial({transparent:true,depthWrite:false,uniforms:{clock:{value:0}},vertexShader:`varying vec2 fieldUV;void main(){fieldUV=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
@@ -61,5 +66,5 @@ export function createFieldObjects(scene:T.Scene){
     exit.visible=s.raid.active;exit.material.uniforms.clock.value=t;exit.material.uniforms.value.value=s.raid.evacuating?1:.06;
 
   }
-  return{update,dispose(){release(models);release(caches);packets.dispose();root.removeFromParent();for(const g of [box,tube,cone,plane,ringGeo,shaftGeo])g.dispose();for(const m of [matte,packets.material,gridMat,exit.material,shaftMat])m.dispose();}};
+  return{update,depth(texture:T.DepthTexture|null,width:number,height:number){flowDepth.value=texture;flowResolution.value.set(width,height);flowOverlay.value=!!texture;},dispose(){release(models);release(caches);packets.dispose();root.removeFromParent();for(const g of [box,tube,cone,plane,ringGeo,shaftGeo])g.dispose();for(const m of [matte,packets.material,gridMat,exit.material,shaftMat])m.dispose();}};
 }

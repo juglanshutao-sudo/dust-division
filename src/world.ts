@@ -16,7 +16,11 @@ function spring3(pos:T.Vector3,velocity:T.Vector3,target:T.Vector3,omega:number,
 }
 export function createWorld(canvas:HTMLCanvasElement){
   const renderer=new T.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance',alpha:false,stencil:false});
-  renderer.info.autoReset=false;renderer.setClearColor('#ece0c7');renderer.outputColorSpace=T.SRGBColorSpace;
+  const gl=renderer.getContext();
+  const debugRenderer=gl.getExtension('WEBGL_debug_renderer_info');
+  const adapterName=debugRenderer?String(gl.getParameter(debugRenderer.UNMASKED_RENDERER_WEBGL)):'';
+  const software=/swiftshader|llvmpipe|softpipe|software rasterizer|microsoft basic render/i.test(adapterName);
+  renderer.info.autoReset=false;renderer.shadowMap.autoUpdate=false;renderer.shadowMap.needsUpdate=true;renderer.setClearColor('#ece0c7');renderer.outputColorSpace=T.SRGBColorSpace;
   renderer.shadowMap.enabled=true;renderer.shadowMap.type=T.PCFShadowMap;
   const scene=new T.Scene();scene.fog=new T.FogExp2('#d7c7a7',.0075);
   const camera=new T.PerspectiveCamera(37,1,.12,440),projectionCamera=camera.clone();
@@ -41,7 +45,7 @@ export function createWorld(canvas:HTMLCanvasElement){
     sh.uniforms.skyNight=nightTone;sh.uniforms.skyCity=cityTone;sh.uniforms.skyIndustry=industrialTone;
   };
   const sky=new T.Mesh(new T.SphereGeometry(302,28,14),skyMat);sky.renderOrder=-10;sky.frustumCulled=false;envRoot.add(sky);
-  const ground=createGeology(envRoot);buildArchitecture(envRoot);
+  const ground=createGeology(envRoot,software);buildArchitecture(envRoot,software);
   // World-space reprojection preserves the original matte at the hero camera while
   // the rock faces and façades acquire parallax as the camera dollies through it.
   const themed=new Set<T.Material>();envRoot.traverse(obj=>{
@@ -63,7 +67,7 @@ export function createWorld(canvas:HTMLCanvasElement){
         cityColor=mix(cityColor,vec3(.91,.68,.015)*clamp(.43+lum,.48,1.),ochre*.86);
         gl_FragColor.rgb=mix(gl_FragColor.rgb,cityColor,fieldCity*.65);
         gl_FragColor.rgb=mix(gl_FragColor.rgb,vec3(lum*.91,lum*.955,lum*.94),fieldIndustry*.85);
-        gl_FragColor.rgb=mix(gl_FragColor.rgb,vec3(lum*1.06,lum*.95,lum*.91),fieldNight*.45);
+        gl_FragColor.rgb=mix(gl_FragColor.rgb,vec3(.006,.007,.009)+lum*vec3(.265,.283,.306),fieldNight*.95);
         if(fieldPlate>.001 && vFieldPlate.w>0.){
           vec2 base=vFieldPlate.xy/vFieldPlate.w*.5+.5;
           vec2 cover=vec2(min(1.,fieldAspect/1.77683),min(1.,1.77683/fieldAspect));
@@ -78,7 +82,7 @@ export function createWorld(canvas:HTMLCanvasElement){
       };material.customProgramCacheKey=()=>cache+'-field-photo-v3';
     }
   });const staticEnvironment=envRoot.children.slice();scene.add(...staticEnvironment);
-  const actors=createActors(scene,terrainHeight),field=createFieldObjects(scene);
+  const actors=createActors(scene,terrainHeight,art),field=createFieldObjects(scene);
   const receiverGeo=new T.PlaneGeometry(14,14,12,12);receiverGeo.rotateX(-Math.PI/2);
   const rPos=receiverGeo.attributes.position;for(let i=0;i<rPos.count;i++)rPos.setY(i,terrainHeight(rPos.getX(i),rPos.getZ(i))+.012);receiverGeo.computeVertexNormals();
   const shadow=new T.Mesh(receiverGeo,new T.ShadowMaterial({color:'#382c21',opacity:.40,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-1}));shadow.receiveShadow=true;scene.add(shadow);
@@ -97,23 +101,35 @@ export function createWorld(canvas:HTMLCanvasElement){
     if(kick>.01){base.r=mix(base.r,texture2D(inputImage,q+p*kick*.006).r,.7);base+=vec3(.08,.042,.015)*kick*(1.-smoothstep(.05,.75,r));}
     gl_FragColor=vec4(base,1.);
     #include <colorspace_fragment>
-    }`});postScene.add(new T.Mesh(new T.PlaneGeometry(2,2),post));
+    }`});const screenQuad=new T.Mesh(new T.PlaneGeometry(2,2),post);postScene.add(screenQuad);
+  const passthrough=new T.ShaderMaterial({depthTest:false,depthWrite:false,uniforms:{cached:{value:postTarget.texture}},vertexShader:`varying vec2 p;void main(){p=uv;gl_Position=vec4(position.xy,0.,1.);}`,fragmentShader:`varying vec2 p;uniform sampler2D cached;void main(){gl_FragColor=texture2D(cached,p);
+    #include <colorspace_fragment>
+    }`});
   const eye=v3(),aim=v3(),vEye=v3(),vAim=v3(),targetEye=v3(),targetAim=v3(),heroEye=v3(),heroAim=v3(),shake=v3(),temp=v3();
   const raycaster=new T.Raycaster(),coords=new T.Vector2(),rect={width:1,height:1,left:0,top:0};
-  let initialized=false,lastMode=0,lastStarted=false,transition=0,fovVel=0,smoothedFrame=1/60,perfTime=0,resScale=1,width=0,height=0,autoMin=.65,forceRatio=0;
+  let initialized=false,lastMode=0,lastStarted=false,transition=0,fovVel=0,smoothedFrame=1/60,perfTime=0,resScale=software?.48:1,width=0,height=0,forceRatio=0;
+  const autoMin=software?.32:.57,cacheEye=v3(Infinity,0,0),cacheAim=v3(),shadowFocus=v3(Infinity,0,0);
+  let cacheFov=0,cacheLight=0,cacheReady=false,cacheSignature='',cacheHour=0,cacheRoverX=0,cacheRoverZ=0,cacheHeading=0,heroResolution=true,shadowAge=Infinity,shadowTopology='',shadowStage='',shadowSunHour=0;
+  let lastRatio=0,lastWidth=0,lastHeight=0;
   let pointerX=0,pointerY=0,lookX=0,lookY=0;
   const pointerMove=(event:PointerEvent)=>{pointerX=((event.clientX-rect.left)/rect.width-.5)*2;pointerY=((event.clientY-rect.top)/rect.height-.5)*2;};window.addEventListener('pointermove',pointerMove,{passive:true});
   function resize(){const r=canvas.getBoundingClientRect();Object.assign(rect,{width:r.width||window.innerWidth,height:r.height||window.innerHeight,left:r.left,top:r.top});width=rect.width;height=rect.height;
-    aspect.value=width/height;const ratio=forceRatio||Math.min(window.devicePixelRatio||1,1.5)*resScale;renderer.setPixelRatio(ratio);renderer.setSize(width,height,false);postTarget.setSize(Math.max(1,Math.round(width*ratio)),Math.max(1,Math.round(height*ratio)));post.uniforms.texel.value.set(1/postTarget.width,1/postTarget.height);
+    aspect.value=width/height;
+    const pixelRatio=Math.min(window.devicePixelRatio||1,1.5),ratio=heroResolution?pixelRatio:forceRatio||pixelRatio*resScale;
+    if(width!==lastWidth||height!==lastHeight||lastRatio!==ratio){
+      renderer.setPixelRatio(ratio);renderer.setSize(width,height,false);postTarget.setSize(Math.max(1,Math.round(width*ratio)),Math.max(1,Math.round(height*ratio)));
+      post.uniforms.texel.value.set(1/postTarget.width,1/postTarget.height);lastWidth=width;lastHeight=height;lastRatio=ratio;cacheReady=false;
+    }
     const narrow=saturate((1.42-aspect.value)/.95),distance=1+narrow*.49;
     heroEye.set(7.3*distance,3.14+.26*narrow,9.65*distance);heroAim.set(-.83+narrow*.45,2.25+.02*narrow,.59);
     projectionCamera.position.copy(heroEye);projectionCamera.aspect=aspect.value;projectionCamera.fov=37+10*narrow;projectionCamera.lookAt(heroAim);projectionCamera.updateProjectionMatrix();projectionCamera.updateMatrixWorld();plateP.value.multiplyMatrices(projectionCamera.projectionMatrix,projectionCamera.matrixWorldInverse);camera.aspect=aspect.value;camera.updateProjectionMatrix();}
   const resizeObserver=new ResizeObserver(resize);resizeObserver.observe(canvas);resize();
-  const skyDay=new T.Color('#d7c7a7'),skyCity=new T.Color('#e5dfcf'),skyIndustry=new T.Color('#76817d'),skyNight=new T.Color('#373433'),fogColor=new T.Color(),keyColor=new T.Color(),ambientColor=new T.Color();
-  const dawnKey=new T.Color('#fff0d0'),moonKey=new T.Color('#c8d2d5'),dayAmbient=new T.Color('#f6eee0'),nightAmbient=new T.Color('#91a8b1');
+  const skyDay=new T.Color('#d7c7a7'),skyCity=new T.Color('#e5dfcf'),skyIndustry=new T.Color('#76817d'),skyNight=new T.Color('#292b30'),fogColor=new T.Color(),keyColor=new T.Color(),ambientColor=new T.Color();
+  const dawnKey=new T.Color('#fff0d0'),moonKey=new T.Color('#fff1d1'),dayAmbient=new T.Color('#f6eee0'),nightAmbient=new T.Color('#b7c2c5');
   function update(rawDt:number,s:GameState){
     const dt=Math.min(.07,Math.max(0,rawDt));time.value+=dt;
     const isHero=s.mode===1&&!s.started, first=!initialized;
+    if(heroResolution!==isHero){heroResolution=isHero;cacheReady=false;resize();}
     if(s.mode!==lastMode || s.started!==lastStarted){if(initialized)transition=1;lastMode=s.mode;lastStarted=s.started;}
     transition*=Math.exp(-2.55*dt);lookX+=(pointerX-lookX)*exp(4,dt);lookY+=(pointerY-lookY)*exp(4,dt);
     const rx=s.rover.x,rz=s.rover.z,ry=terrainHeight(rx,rz),head=s.rover.heading;
@@ -131,27 +147,54 @@ export function createWorld(canvas:HTMLCanvasElement){
     const solar=Math.sin((s.hour-6)/24*Math.PI*2),night=s.mode===4||s.raid.active?1:isHero?0:saturate((.15-solar)*1.5);
     cityTone.value+=((s.mode===2?1:0)-cityTone.value)*mix;industrialTone.value+=((s.mode===3?1:0)-industrialTone.value)*mix;nightTone.value+=(night-nightTone.value)*mix;
     fogColor.copy(skyDay).lerp(skyCity,cityTone.value).lerp(skyIndustry,industrialTone.value*.72).lerp(skyNight,nightTone.value);const fog=scene.fog as T.FogExp2;fog.color.copy(fogColor);fog.density=.0064+(s.weather==='dust'?.003:0)+nightTone.value*.005;
-    sun.target.position.set(isHero?0:aim.x,0,isHero?0:aim.z);const azimuth=(s.hour-12)*.105,altitude=isHero?34:13+27*Math.max(0,solar);sun.position.copy(sun.target.position).add(isHero?temp.set(-24,34,24):temp.set(-32*Math.sin(azimuth),altitude,29*Math.cos(azimuth)));keyColor.copy(dawnKey).lerp(moonKey,nightTone.value);sun.color.copy(keyColor);sun.intensity=2.24-nightTone.value*1.29-(s.weather==='dust'?.38:0);
-    ambientColor.copy(dayAmbient).lerp(nightAmbient,nightTone.value);hemi.color.copy(ambientColor);hemi.intensity=1.62-1.13*nightTone.value;rim.intensity=.65-.25*nightTone.value;shadow.visible=plate.value>.01;shadow.material.opacity=.45*plate.value;
+    sun.target.position.set(isHero?0:aim.x,0,isHero?0:aim.z);const azimuth=(s.hour-12)*.105,altitude=isHero?34:13+27*Math.max(0,solar);temp.set(-32*Math.sin(azimuth),altitude,29*Math.cos(azimuth));if(isHero)temp.set(-24,34,24);else if(night>.5)temp.set(-24,27,35);sun.position.copy(sun.target.position).add(temp);keyColor.copy(dawnKey).lerp(moonKey,nightTone.value);sun.color.copy(keyColor);sun.intensity=2.24+nightTone.value*.47-(s.weather==='dust'?.38:0);
+    ambientColor.copy(dayAmbient).lerp(nightAmbient,nightTone.value);hemi.color.copy(ambientColor);hemi.intensity=1.62-.86*nightTone.value;rim.intensity=.65+1.24*nightTone.value;rim.color.set(nightTone.value>.5?0xffdbc4:0xfbd9a2);shadow.visible=plate.value>.01;shadow.material.opacity=.45*plate.value;
     actors.update(dt,s);field.update(dt,s,nightTone.value);particles.update(dt,s,isHero?heroAim:aim,isHero);post.uniforms.kick.value=Math.max(s.fx.hit*.65,s.fx.parry,s.fx.shake*.6);post.uniforms.travel.value=transition;post.uniforms.focusDistance.value=eye.distanceTo(aim);
     const plateOnly=isHero&&photoReady&&transition<.016;
     heroBackdrop.visible=plateOnly;for(const item of staticEnvironment)item.visible=!plateOnly;
-    renderer.info.reset();renderer.setRenderTarget(postTarget);renderer.render(scene,camera);renderer.setRenderTarget(null);renderer.render(postScene,quadCamera);
-    smoothedFrame+=(Math.min(rawDt,.12)-smoothedFrame)*.08;perfTime+=dt;
-    if(perfTime>2.5&&!forceRatio&&!document.hidden){perfTime=0;const scale=resScale;if(smoothedFrame>.034)resScale=Math.max(autoMin,resScale-.12);else if(smoothedFrame<.0179)resScale=Math.min(1,resScale+.06);if(Math.abs(scale-resScale)>.005)resize();}
+    // The parked vehicle is a rigid, fully lit asset. Preserve its completed
+    // color and depth until its projection or light changes by a visible amount.
+    const surveyed=!s.raid.active&&(s.mode===2||s.mode===3)&&transition<.008&&Math.abs(s.rover.speed)<.035;
+    const reusable=plateOnly||surveyed,signature=s.mode+'|'+s.weather+'|'+s.nodes.map(n=>n.id+':'+Number(n.powered)+Number(n.linked)).join('.')+'|'+s.caches.map(c=>Number(c.claimed)).join('');
+    const changed=signature!==cacheSignature||Math.abs(s.hour-cacheHour)>.045||Math.hypot(s.rover.x-cacheRoverX,s.rover.z-cacheRoverZ)>.015||Math.abs(s.rover.heading-cacheHeading)>.003;
+    const refresh=!reusable||changed||!cacheReady||cacheEye.distanceToSquared(eye)>.000026||cacheAim.distanceToSquared(aim)>.000026||Math.abs(cacheFov-camera.fov)>.012||Math.abs(cacheLight-sun.intensity)>.016;
+    const stage=plateOnly?'plate':s.mode+':'+s.raid.active,topology=s.nodes.map(node=>node.id).join(',');
+    const moving=Math.abs(s.rover.speed)>.1||s.raid.active||s.mode===4;
+    shadowAge+=dt;
+    const redrawShadow=stage!==shadowStage||topology!==shadowTopology||shadowFocus.distanceToSquared(sun.target.position)>.36||Math.abs(shadowSunHour-s.hour)>.08||(moving&&shadowAge>(software?.13:.045));
+    renderer.info.reset();
+    if(refresh){
+      if(redrawShadow){renderer.shadowMap.needsUpdate=true;shadowAge=0;shadowStage=stage;shadowTopology=topology;shadowFocus.copy(sun.target.position);shadowSunHour=s.hour;}
+      camera.layers.set(0);if(!reusable)camera.layers.enable(1);
+      particles.depth(null,postTarget.width,postTarget.height);field.depth(null,postTarget.width,postTarget.height);
+      renderer.setRenderTarget(postTarget);renderer.render(scene,camera);renderer.setRenderTarget(null);
+      cacheReady=reusable;cacheSignature=signature;cacheHour=s.hour;cacheRoverX=s.rover.x;cacheRoverZ=s.rover.z;cacheHeading=s.rover.heading;cacheEye.copy(eye);cacheAim.copy(aim);cacheFov=camera.fov;cacheLight=sun.intensity;
+    }
+    screenQuad.material=post.uniforms.kick.value>.01||transition>.01?post:passthrough;
+    renderer.render(postScene,quadCamera);
+    if(reusable){
+      // Reproject each live mote against the cached depth without drawing the
+      // opaque vehicle and its directional shadow again.
+      particles.depth(postTarget.depthTexture,postTarget.width,postTarget.height);field.depth(postTarget.depthTexture,postTarget.width,postTarget.height);camera.layers.set(1);renderer.autoClear=false;
+      renderer.render(scene,camera);renderer.autoClear=true;camera.layers.set(0);
+    }
+    smoothedFrame+=(Math.min(rawDt,.2)-smoothedFrame)*.12;perfTime+=Math.min(rawDt,.25);
+    if(!isHero&&perfTime>(software?.65:1.1)&&!forceRatio&&!document.hidden){perfTime=0;const scale=resScale;if(smoothedFrame>.023)resScale=Math.max(autoMin,resScale*(smoothedFrame>.05?.76:.90));else if(smoothedFrame<.0174)resScale=Math.min(software?.66:1,resScale+.035);if(Math.abs(scale-resScale)>.005)resize();}
   }
   function pick(clientX:number,clientY:number){coords.set((clientX-rect.left)/rect.width*2-1,1-(clientY-rect.top)/rect.height*2);raycaster.setFromCamera(coords,camera);const hit=raycaster.intersectObject(ground,false)[0];return hit?{x:hit.point.x,z:hit.point.z}:null;}
   function project(x:number,z:number,lift=0){temp.set(x,terrainHeight(x,z)+lift,z).project(camera);return{x:(temp.x*.5+.5)*rect.width+rect.left,y:(.5-temp.y*.5)*rect.height+rect.top,visible:temp.z>0&&temp.z<1&&Math.abs(temp.x)<1.03&&Math.abs(temp.y)<1.03};}
-  function setQuality(q:'auto'|'high'|'low'|number){forceRatio=typeof q==='number'?q:q==='auto'?0:q==='high'?Math.min(devicePixelRatio,1.7):.68;autoMin=.65;const mapSize=q==='low'?512:q==='high'?2048:1024;if(sun.shadow.mapSize.x!==mapSize){sun.shadow.mapSize.set(mapSize,mapSize);sun.shadow.map?.dispose();sun.shadow.map=null;sun.shadow.needsUpdate=true;}resize();}
-  function dispose(){released=true;resizeObserver.disconnect();window.removeEventListener('pointermove',pointerMove);actors.dispose();field.dispose();const geos=new Set<T.BufferGeometry>(),materials=new Set<T.Material>();scene.traverse(obj=>{const m=obj as T.Mesh;if(m.geometry)geos.add(m.geometry);if(m.material)for(const mat of Array.isArray(m.material)?m.material:[m.material])materials.add(mat);});geos.forEach(g=>g.dispose());materials.forEach(m=>m.dispose());postTarget.dispose();post.dispose();if(art.value!==fallback)art.value.dispose();fallback.dispose();renderer.dispose();}
+  function setQuality(q:'auto'|'high'|'low'|number){forceRatio=typeof q==='number'?q:q==='auto'?0:q==='high'?Math.min(devicePixelRatio,1.7):.68;const mapSize=q==='low'||(q==='auto'&&software)?512:q==='high'?2048:1024;if(sun.shadow.mapSize.x!==mapSize){sun.shadow.mapSize.set(mapSize,mapSize);sun.shadow.map?.dispose();sun.shadow.map=null;sun.shadow.needsUpdate=true;renderer.shadowMap.needsUpdate=true;cacheReady=false;}resize();}
+  function dispose(){released=true;resizeObserver.disconnect();window.removeEventListener('pointermove',pointerMove);actors.dispose();field.dispose();const geos=new Set<T.BufferGeometry>(),materials=new Set<T.Material>();scene.traverse(obj=>{const m=obj as T.Mesh;if(m.geometry)geos.add(m.geometry);if(m.material)for(const mat of Array.isArray(m.material)?m.material:[m.material])materials.add(mat);});geos.forEach(g=>g.dispose());materials.forEach(m=>m.dispose());postTarget.dispose();post.dispose();passthrough.dispose();screenQuad.geometry.dispose();if(art.value!==fallback)art.value.dispose();fallback.dispose();renderer.dispose();}
   return {update,pick,project,dispose,setQuality,stats:()=>({calls:renderer.info.render.calls,triangles:renderer.info.render.triangles})};
 }
 function makeDust(scene:T.Scene){
   const r=randomSource(221),count=115,pos=new Float32Array(count*3),seeds=new Float32Array(count);
   for(let i=0;i<count;i++){pos[i*3]=(r()-.5)*30;pos[i*3+1]=.1+r()**2*8;pos[i*3+2]=(r()-.5)*30;seeds[i]=r();}
   const geom=new T.BufferGeometry();geom.setAttribute('position',new T.BufferAttribute(pos,3));geom.setAttribute('phase',new T.BufferAttribute(seeds,1));
-  const mat=new T.ShaderMaterial({transparent:true,depthWrite:false,uniforms:{clock:{value:0},opacity:{value:.3},tint:{value:new T.Color('#ccb691')}},vertexShader:`attribute float phase;uniform float clock;varying float vA;void main(){vec3 p=position;p.x=mod(p.x+15.+clock*(.14+phase*.36),30.)-15.;p.y+=sin(phase*35.+clock*.33)*.16;vec4 mv=modelViewMatrix*vec4(p,1.);gl_Position=projectionMatrix*mv;gl_PointSize=clamp((11.+phase*13.)/-mv.z,1.,3.1);vA=.25+.66*phase;}`,
-    fragmentShader:`varying float vA;uniform float opacity;uniform vec3 tint;void main(){float s=1.-smoothstep(.08,.5,length(gl_PointCoord-.5));gl_FragColor=vec4(tint,s*opacity*vA);}`});
-  const clouds=new T.Points(geom,mat);clouds.frustumCulled=false;scene.add(clouds);
-  return{update(dt:number,s:GameState,center:T.Vector3,hero:boolean){mat.uniforms.clock.value+=dt*(s.weather==='dust'?2.1:1);mat.uniforms.opacity.value=hero?.27:s.mode===4?.61:.44;clouds.position.set(center.x,0,center.z);}};
+  const mat=new T.ShaderMaterial({transparent:true,depthWrite:false,uniforms:{clock:{value:0},overlay:{value:false},depthImage:{value:null as T.DepthTexture|null},resolution:{value:new T.Vector2(1,1)},opacity:{value:.3},tint:{value:new T.Color('#ccb691')}},vertexShader:`attribute float phase;uniform float clock;varying float vA;void main(){vec3 p=position;p.x=mod(p.x+15.+clock*(.14+phase*.36),30.)-15.;p.y+=sin(phase*35.+clock*.33)*.16;vec4 mv=modelViewMatrix*vec4(p,1.);gl_Position=projectionMatrix*mv;gl_PointSize=clamp((11.+phase*13.)/-mv.z,1.,3.1);vA=.25+.66*phase;}`,
+    fragmentShader:`varying float vA;uniform float opacity;uniform bool overlay;uniform sampler2D depthImage;uniform vec2 resolution;uniform vec3 tint;void main(){if(overlay&&gl_FragCoord.z>texture2D(depthImage,gl_FragCoord.xy/resolution).r+.00004)discard;float s=1.-smoothstep(.08,.5,length(gl_PointCoord-.5));gl_FragColor=vec4(tint,s*opacity*vA);
+    #include <colorspace_fragment>
+    }`});
+  const clouds=new T.Points(geom,mat);clouds.frustumCulled=false;clouds.layers.set(1);scene.add(clouds);
+  return{depth(tex:T.DepthTexture|null,w:number,h:number){mat.uniforms.overlay.value=!!tex;mat.uniforms.depthImage.value=tex;mat.uniforms.resolution.value.set(w,h);},update(dt:number,s:GameState,center:T.Vector3,hero:boolean){mat.uniforms.clock.value+=dt*(s.weather==='dust'?2.1:1);mat.uniforms.opacity.value=hero?.27:s.mode===4?.61:.44;clouds.position.set(center.x,0,center.z);}};
 }

@@ -13,12 +13,14 @@ let s=game.state;
 assert.equal(s.mode,1);assert.equal(s.started,false);
 for(let mode=1;mode<=4;mode++) assert.ok(game.setMode(mode));
 game.setMode(1);game.act('start');
+const initialForward={x:Math.sin(s.rover.heading),z:Math.cos(s.rover.heading)};
+assert.ok(initialForward.z<0,'On deployment the rover faces the industrial district');
 const climb=new Game(undefined,(_x,z)=>z*.4),descend=new Game(undefined,(_x,z)=>-z*.4);
-climb.act('start');descend.act('start');
+climb.state.rover.heading=0;descend.state.rover.heading=0;climb.act('start');descend.act('start');
 go(climb,1,{forward:1});go(descend,1,{forward:1});assert.ok(descend.state.rover.z>climb.state.rover.z+2);
 const idle=new Game();go(idle,1,{forward:1});assert.equal(idle.state.rover.z,0);
-go(game,1.5,{forward:1});assert.ok(s.rover.z>5);assert.ok(s.rover.speed>6);
-go(game,.55,{forward:1,turn:1,drift:true});assert.ok(s.rover.drift>.3);assert.ok(s.rover.heading>.3);
+go(game,1.5,{forward:1});assert.ok(s.rover.z*initialForward.z+s.rover.x*initialForward.x>5);assert.ok(s.rover.speed>6);
+go(game,.55,{forward:1,turn:1,drift:true});assert.ok(s.rover.drift>.3);assert.ok(Math.abs(s.rover.heading-Math.atan2(initialForward.x,initialForward.z))>.3);
 assert.ok(game.act('park'));assert.equal(s.started,false);assert.equal(s.mode,1);
 game.act('start');go(game,.5,{forward:1});
 Object.assign(s.rover,{x:0,z:-4,heading:Math.PI,vx:0,vz:0,speed:0});
@@ -119,3 +121,61 @@ evacuated.state.party.x-=8;go(evacuated,.2);assert.equal(evacuated.state.raid.ex
 Object.assign(evacuated.state.party,EXTRACTION);go(evacuated,5.2);assert.ok(evacuated.state.report.success);
 assert.equal(evacuated.state.report.bossDown,false);
 console.log('PASS  Squad wipe/timeout penalties, salvage reset, interruptible extraction and optional boss bypass');
+
+function deployment(style) {
+  const run=new Game();
+  if(style!=='Wedge')assert.ok(run.act('position',{operator:1,cell:style==='Line'?1:8}));
+  assert.equal(run.state.party.linkStyle,style);
+  assert.ok(run.act('raid'));
+  assert.equal(run.state.party.linkStyle,style);
+  assert.equal(run.act('position',{operator:0,cell:6}),false);
+  const {party:p,boss:b}=run.state;
+  p.x=b.x;p.z=b.z+3;
+  const startingBoss=b.hp;
+  assert.ok(run.act('attack'));
+  const damage=startingBoss-b.hp;
+  Object.assign(b,{stage:'windup',stageTime:.005,stageDuration:1,move:'slam',range:6.7});
+  const startingParty=p.hp;
+  go(run,.13);
+  return {damage,stagger:b.poise,taken:startingParty-p.hp};
+}
+const wedge=deployment('Wedge'),line=deployment('Line'),dispersed=deployment('Dispersed');
+close(line.damage,wedge.damage*1.08);close(wedge.stagger,line.stagger*1.12);close(dispersed.taken,wedge.taken*.85);
+const board=new Game();
+assert.ok(board.act('position',{operator:0,cell:2}));
+assert.deepEqual(board.state.party.positions,[2,4,0]);
+assert.equal(board.act('position',{operator:3,cell:6}),false);
+assert.equal(board.act('position',{operator:1,cell:-1}),false);
+assert.deepEqual(board.state.party.positions,[2,4,0]);
+let slotText;
+const boardDisk={getItem:()=>slotText??null,setItem:(_key,value)=>{slotText=value}};
+const savedBoard=new Game(boardDisk);savedBoard.act('position',{operator:1,cell:1});savedBoard.act('raid');savedBoard.save();
+const loadedBoard=new Game(boardDisk);assert.equal(loadedBoard.state.raid.active,true);
+assert.deepEqual(loadedBoard.state.party.positions,[0,1,2]);assert.equal(loadedBoard.state.party.linkStyle,'Line');
+const legacy=JSON.parse(slotText);delete legacy.party.positions;delete legacy.party.linkStyle;slotText=JSON.stringify(legacy);
+assert.deepEqual(new Game(boardDisk).state.party.positions,[0,4,2]);
+legacy.party.positions=[2,2,8];slotText=JSON.stringify(legacy);assert.equal(new Game(boardDisk).state.party.linkStyle,'Wedge');
+console.log('PASS  3×3 deployment, occupied-cell swap, all three combat modifiers, locked positions and save migration');
+
+function telegraphedMove({distance=6,phase=1,operator,guard=false,index=0}) {
+  const run=new Game();if(operator!==undefined)run.act('formation',operator);run.act('raid');
+  const {party:p,boss:b}=run.state;
+  p.x=b.x;p.z=b.z+3;
+  if(operator!==undefined) {
+    b.hp=140;
+    assert.ok(run.act('attack'));
+  }
+  p.z=b.z+distance;
+  Object.assign(b,{phase,stage:'idle',stageTime:0,attackIndex:index});
+  if(guard)assert.ok(run.act('parry'));
+  go(run,.13);
+  assert.equal(b.stage,'windup');
+  return b.move;
+}
+assert.equal(telegraphedMove({distance:10,guard:true}),'lunge');
+assert.equal(telegraphedMove({distance:5,guard:true}),'slam');
+assert.equal(telegraphedMove({distance:6,operator:1,phase:2,index:1}),'lunge');
+assert.equal(telegraphedMove({distance:6,operator:2,phase:2,index:0}),'sweep');
+assert.equal(telegraphedMove({distance:4,phase:3,index:0}),'slam');
+assert.equal(telegraphedMove({distance:4,phase:1,index:0}),'sweep');
+console.log('PASS  Warden prioritizes gap closing, guarded targets, recent ranged/heavy attackers and phase-specific patterns');

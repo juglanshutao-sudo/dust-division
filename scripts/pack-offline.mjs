@@ -92,11 +92,16 @@ for (const match of [...html.matchAll(/<(?:link|img)\b[^>]*?\b(href|src)="([^"]+
   marked.add(path)
   html = html.replace(match[0], () => tag)
 }
+// World materials may first appear deep in play. Keep those bytes inert until
+// the renderer requests them, without requiring preload tags in the hosted UI.
+const deferredImages = []
 for (const path of runtimeAssets) {
-  if (!marked.has(path)) throw new Error(`Runtime image missing from the HTML asset registry: ${path}`)
+  if (marked.has(path)) continue
+  deferredImages.push(`<script type="application/octet-stream" data-offline-path="${path}">${await dataFor(path)}</script>`)
 }
+html = html.replace('</head>', () => `${deferredImages.join('\n')}\n</head>`)
 
-const boot = `const embedded = new Map(Array.from(document.querySelectorAll('[data-offline-path]'), el => [el.dataset.offlinePath, el.getAttribute('src') || el.getAttribute('href')]));
+const boot = `const embedded = new Map(Array.from(document.querySelectorAll('[data-offline-path]'), el => [el.dataset.offlinePath, el.getAttribute('src') || el.getAttribute('href') || el.textContent]));
 globalThis.__dustAsset = path => { if (!embedded.has(path)) throw new Error('Missing embedded asset: ' + path); return embedded.get(path) };
 `
 const js = (boot + chunks[0].code).replace(/<\/script/gi, '<\\/script')

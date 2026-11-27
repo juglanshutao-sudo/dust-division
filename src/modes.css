@@ -223,3 +223,28 @@
   #viewport:has(#touch-controls:not([hidden])) .mh-raid .mh-bl,
   #viewport:has(#touch-controls:not([hidden])) .mh-battle .mh-bl { left:154px; bottom:14px; }
 }
+.formation-plan { display: flex; align-items: center; gap: 10px; width: fit-content; margin-bottom: 12px; color: #ece8df; }
+.formation-tiles { display: grid; grid-template-columns: repeat(3,27px); border: 1px solid #aaa597; background: #111113; }
+.mode-huds .formation-tile { position: relative; display: grid; place-items: center; height: 27px; border-inline-end: 1px solid #6b6860; border-block-end: 1px solid #6b6860; }
+.mode-huds .formation-tile:nth-child(3n) { border-inline-end: 0; }
+.mode-huds .formation-tile:nth-child(n+7) { border-block-end: 0; }
+.formation-tile[data-crew="-1"]::before { content: ""; width: 2px; height: 2px; background: #77746e; }
+.formation-tile .mh-symbol { width: 17px; height: 17px; stroke-width: 1.8; }
+.formation-tile[aria-pressed="true"] { background: #ece8df; color: #111113; }
+.formation-tile:hover { background: #b8332a; color: #ece8df; }
+.formation-tile:focus-visible { z-index:1; }
+.formation-readout { display: grid; justify-items: start; align-content: center; padding: 8px; background: #111113; }
+.formation-readout strong { margin-top: 2px; font: 700 22px/1 var(--mh-condensed); text-transform: uppercase; }
+.formation-readout span, .formation-readout small { font: 500 10px/1.4 var(--mh-mono); }
+.formation-readout small { color: #c5bfb2; margin-top: 5px; }
+@media(max-width:600px), (max-height:550px) {
+  .formation-plan { margin-bottom: 7px; gap: 5px; }
+  .formation-tiles { grid-template-columns: repeat(3,25px); }
+  .mode-huds .formation-tile { height: 25px; }
+  .formation-readout { padding: 5px; }
+  .formation-readout strong { font-size: 17px; }
+  .formation-readout span,.formation-readout small { font-size: 9px; }
+}
+.formation-readout { pointer-events: auto; cursor: help; }
+
+.evac-course{display:flex;align-items:center;justify-content:flex-end;gap:10px}.evac-course b{font-weight:500;color:#00c853}.mh-city .city-title{font-size:clamp(47px,6.7vw,108px)}

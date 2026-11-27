@@ -23,10 +23,10 @@ const hero=over.querySelector<HTMLElement>('.hero-copy')!,landmark=over.querySel
 let canvas=el<HTMLCanvasElement>('world')
 let storage:Storage|undefined
 try{storage=window.localStorage}catch{/* Private sessions can still play. */}
-const prefs:Preferences={audio:true,volume:.64,quality:'auto',motion:!matchMedia('(prefers-reduced-motion:reduce)').matches}
+const prefs:Preferences={compatibility:false,audio:true,volume:.64,quality:'auto',motion:!matchMedia('(prefers-reduced-motion:reduce)').matches}
 try{
  const saved=JSON.parse(storage?.getItem('dust-division.preferences')||'{}')
- for(const k of ['audio','motion'] as const)if(typeof saved[k]==='boolean')prefs[k]=saved[k]
+ for(const k of ['audio','motion','compatibility'] as const)if(typeof saved[k]==='boolean')prefs[k]=saved[k]
  if(typeof saved.volume==='number')prefs.volume=Math.max(0,Math.min(1,saved.volume))
  if(['auto','high','low'].includes(saved.quality))prefs.quality=saved.quality
 }catch{}
@@ -48,7 +48,7 @@ function mode(n:Mode){game.setMode(n);refresh(true)}
 function act(action:string,value?:unknown){game.act(action,value);refresh(true)}
 nav.onclick=e=>{const b=(e.target as Element).closest<HTMLButtonElement>('[data-mode]');if(b)mode(Number(b.dataset.mode) as Mode)}
 document.querySelector<HTMLAnchorElement>('.identity')!.onclick=e=>{e.preventDefault();if(game.state.raid.active)mode(4);else{act('park');mode(1)}}
-deploy.onclick=()=>{unlock();act('start');canvas.focus({preventScroll:true})}
+deploy.onclick=()=>{unlock();act(game.state.raid.active?'raid':'start');canvas.focus({preventScroll:true})}
 el('park').onclick=()=>act('park')
 el('interact').onclick=()=>act('interact')
 function showPanel(which:string,index=game.state.mode-1){
@@ -58,6 +58,7 @@ function showPanel(which:string,index=game.state.mode-1){
   if(which==='guide'){
     drawer.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach(b=>b.onclick=()=>{showPanel('guide',Number(b.dataset.tab));drawer.querySelector<HTMLButtonElement>('[data-tab="'+b.dataset.tab+'"]')?.focus()})
   }else{
+    el<HTMLSelectElement>('render-path').onchange=e=>{prefs.compatibility=(e.target as HTMLSelectElement).value==='canvas';savePrefs();game.save();location.reload()}
     el<HTMLSelectElement>('quality').onchange=e=>{prefs.quality=(e.target as HTMLSelectElement).value as Preferences['quality'];world?.setQuality?.(prefs.quality);savePrefs()}
     el<HTMLInputElement>('volume').oninput=e=>{const percent=(e.target as HTMLInputElement).valueAsNumber;prefs.volume=percent/100;sound.setVolume(prefs.volume);el('volume-text').textContent=percent+'%';savePrefs()}
     el('motion').onclick=()=>{prefs.motion=!prefs.motion;el('motion').textContent=prefs.motion?'FULL':'REDUCED';el('motion').setAttribute('aria-pressed',String(prefs.motion));savePrefs()}
@@ -68,7 +69,7 @@ function showPanel(which:string,index=game.state.mode-1){
 el('settings').onclick=()=>showPanel('settings')
 document.querySelector<HTMLButtonElement>('.guide-trigger')!.onclick=()=>showPanel('guide')
 el('close-panel').onclick=()=>drawer.close()
-drawer.onclose=()=>{panel='';keys.clear()}
+drawer.onclose=()=>{panel=''}
 drawer.onclick=e=>{if(e.target===drawer){const r=drawer.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)drawer.close()}}
 const touch=el('touch-controls')
 touch.innerHTML=[['KeyW','↑','Move forward'],['KeyA','←','Move left'],['KeyS','↓','Move back'],['KeyD','→','Move right']].map(([code,label,title])=>'<button aria-label="'+title+'" data-code="'+code+'">'+label+'</button>').join('')
@@ -85,13 +86,13 @@ function controlLine(s:GameState){
 }
 let lastTime='',lastWeather='',lastContext='',lastDay='',lastSpeed=''
 function refresh(force=false){
- const s=game.state,driving=s.mode===1&&s.started,signature=[s.mode,s.started,s.raid.active].join(':')
+ const s=game.state,driving=s.mode===1&&s.started&&!s.raid.active,signature=[s.mode,s.started,s.raid.active].join(':')
  if(force||signature!==viewSignature){
-   viewSignature=signature;app.dataset.mode=String(s.mode);app.classList.toggle('is-driving',driving)
+   viewSignature=signature;if(ready)deploy.querySelector('strong')!.textContent=s.raid.active?'RESUME SORTIE':'ENTER SECTOR';app.dataset.mode=String(s.mode);app.classList.toggle('is-driving',driving)
    nav.querySelectorAll('button').forEach(b=>b.setAttribute('aria-current',String(Number(b.dataset.mode)===s.mode)))
    over.hidden=s.mode!==1;hero.hidden=driving;landmark.hidden=driving;driveInfo.hidden=!driving;driveSpeed.hidden=!driving;waypoint.hidden=!driving
    el('keyline').innerHTML=controlLine(s)
-   el('status-word').textContent=s.raid.active?'SORTIE ACTIVE':s.mode===3?'GRID ONLINE':s.mode===4?'SQUAD LINKED':'SYSTEM ONLINE'
+   el('status-word').textContent=s.raid.active?(s.mode<3?'SORTIE PAUSED':'SORTIE ACTIVE'):s.mode===3?'GRID ONLINE':s.mode===4?'SQUAD LINKED':'SYSTEM ONLINE'
    touch.hidden=!matchMedia('(pointer:coarse)').matches||!s.started||!(s.mode<=2||(s.raid.active&&s.mode>=3))
  }
  if(s.mode===1){
@@ -135,7 +136,7 @@ function handleKey(e:KeyboardEvent){
  if(key==='Escape'){showPanel('settings');return}
  if(key==='KeyM'){toggleAudio();return}
  if(!ready)return
- if(key==='Enter'&&!s.started&&s.mode===1&&!(e.target as Element).closest('button,a')){e.preventDefault();act('start');return}
+ if(key==='Enter'&&(!s.started||s.raid.active)&&s.mode===1&&!(e.target as Element).closest('button,a')){e.preventDefault();act(s.raid.active?'raid':'start');return}
  if(key==='KeyR'&&s.mode===1&&s.started){act('park');return}
  if(key==='KeyE'){act('interact');return}
  if(!s.raid.active||s.mode<3)return
@@ -157,7 +158,8 @@ function frame(ms:number){
    game.tick(dt,{forward:down('KeyW','ArrowUp')-down('KeyS','ArrowDown'),turn:down('KeyD','ArrowRight')-down('KeyA','ArrowLeft'),drift:!!down('ShiftLeft','ShiftRight','Space')})
  }
  const state=game.state
- const drawState=prefs.motion?state:{...state,fx:{...state.fx,shake:0,hit:0,hurt:0}}
+ const viewState=state.mode===1&&state.raid.active?{...state,started:false}:state
+ const drawState=prefs.motion?viewState:{...viewState,fx:{...viewState.fx,shake:0,hit:0,hurt:0}}
  world.update(dt,drawState);sound.update(dt,state)
  frames++;if(!sampleStart)sampleStart=ms
  if(ms-sampleStart>=1200){fps=Math.min(360,frames*1000/(ms-sampleStart));el('frame-data').textContent=Math.round(fps)+' FPS';frames=0;sampleStart=ms}
@@ -168,13 +170,14 @@ function frame(ms:number){
 }
 async function boot(){
  try{
+   if(prefs.compatibility){const {createFallback}=await import('./fallback');world=createFallback(canvas);renderType='Canvas 2D'}else{
    const {createWorld}=await import('./world')
-   world=createWorld(canvas);renderType='WebGL 2'
+   world=createWorld(canvas);renderType='WebGL 2'}
  }catch{
    const replacement=canvas.cloneNode(false) as HTMLCanvasElement;canvas.replaceWith(replacement);canvas=replacement
    const {createFallback}=await import('./fallback');world=createFallback(canvas);renderType='Canvas 2D'
  }
  world.setQuality?.(prefs.quality);initCanvas();statusAudio();refresh(true)
- deploy.querySelector('strong')!.textContent='ENTER SECTOR';deploy.disabled=false;ready=true;app.setAttribute('aria-busy','false');requestAnimationFrame(frame)
+ deploy.querySelector('strong')!.textContent=game.state.raid.active?'RESUME SORTIE':'ENTER SECTOR';deploy.disabled=false;ready=true;app.setAttribute('aria-busy','false');requestAnimationFrame(frame)
 }
 void boot()

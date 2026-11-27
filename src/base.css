@@ -102,3 +102,12 @@ kbd{font:500 10px/1 var(--mono);border:1px solid currentColor;padding:3px 5px;di
 #standby-rover{position:absolute;pointer-events:none;left:59%;bottom:16%;width:min(41vw,76vh);translate:-50% 0}
 #terminal[aria-busy="false"] #standby-rover{display:none}
 @media(max-width:650px){#standby-rover{left:62%;bottom:18%;width:80vw}}
+/* The district's façades are the navigation surface. */
+#terminal[data-mode="2"] .topbar{background:transparent;border:0;pointer-events:none}
+#terminal[data-mode="2"] .topbar button,#terminal[data-mode="2"] .topbar a{pointer-events:auto}
+#terminal[data-mode="2"] #modes-nav{display:none}
+#terminal[data-mode="3"] .nav-mode,#terminal[data-mode="3"] .identity{font-family:var(--mono);text-transform:uppercase}
+#terminal[data-mode="3"] .identity{font-size:15px;letter-spacing:-.04em}
+#terminal[data-mode="3"] .nav-mode{font-size:11px;letter-spacing:.025em}
+#terminal[data-mode="4"] .topbar{border-bottom:1px solid #b8332a}
+@media(max-width:650px){#terminal[data-mode="2"]{--hud-top:51px}#terminal[data-mode="2"] .topbar{padding-bottom:0}}

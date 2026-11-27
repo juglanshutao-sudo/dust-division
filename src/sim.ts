@@ -1,3 +1,4 @@
+import {DISTRICT_FOOTPRINTS} from './district-layout.ts';
 // All horizontal distances are metres. Heading zero points along world +Z.
 export type Mode = 1 | 2 | 3 | 4;
 export interface Point { x: number; z: number }
@@ -35,8 +36,9 @@ export interface Link {from:number;to:number;kind:'power'|'belt'}
 export interface Cache extends Point { id:string;amount:number;claimed:boolean;night:boolean }
 export interface Stock { alloy:number;ore:number;cores:number }
 export interface Rover extends Point {heading:number;speed:number;drift:number;vx:number;vz:number}
+export type LinkStyle = 'Line'|'Wedge'|'Dispersed';
 export interface Party extends Point {
-  heading:number;active:number;formation:number[];hp:number;maxHp:number;bond:string;
+  heading:number;active:number;formation:number[];positions:number[];linkStyle:LinkStyle;hp:number;maxHp:number;bond:string;
   attackCooldown:number;switchCooldown:number;dodgeCooldown:number;parryCooldown:number;guard:number;invulnerable:number;
 }
 export interface Boss extends Point {
@@ -53,7 +55,7 @@ export interface GameState {
   fx:{hit:number;parry:number;shake:number;attack:number;dodge:number;switch:number;finish:number;hitstop:number;hurt:number;resonance:number};
 }
 export interface StorageLike {getItem(key:string):string|null;setItem(key:string,value:string):void}
-export type Action = 'start'|'park'|'interact'|'selectBuild'|'build'|'remove'|'raid'|'attack'|'parry'|'dodge'|'switch'|'formation'|'extract'|'finish'|'upgrade'|'district'|'salvage'|'return'|'dismiss';
+export type Action = 'start'|'park'|'interact'|'selectBuild'|'build'|'remove'|'raid'|'attack'|'parry'|'dodge'|'switch'|'formation'|'position'|'extract'|'finish'|'upgrade'|'district'|'salvage'|'return'|'dismiss';
 const SAVE = 'dust-division.field-save.v1';
 const STEP = 1/90;
 const clamp = (n:number,lo:number,hi:number)=>Math.max(lo,Math.min(hi,n));
@@ -85,8 +87,20 @@ function makeBoss():Boss {
   return {...ARENA,z:-33,hp:225,maxHp:225,phase:1,stage:'idle',stageTime:1.8,stageDuration:1.8,telegraph:0,
     move:'sweep',range:7.6,heading:0,targetX:36,targetZ:-23,poise:0,attackIndex:0};
 }
+function formationStyle(cells:number[]):LinkStyle {
+  const points=cells.map(cell=>({x:cell%3,z:Math.floor(cell/3)}));
+  const [a,b,c]=points;
+  if((b.x-a.x)*(c.z-a.z)===(b.z-a.z)*(c.x-a.x)) return 'Line';
+  // A bend in the line remains linked when one operator can reach both neighbours.
+  const connected=points.some(p=>points.every(q=>Math.max(Math.abs(q.x-p.x),Math.abs(q.z-p.z))<=1));
+  return connected?'Wedge':'Dispersed';
+}
+function validPositions(cells:unknown):cells is number[] {
+  return Array.isArray(cells)&&cells.length===3&&new Set(cells).size===3
+    &&cells.every(c=>Number.isInteger(c)&&c>=0&&c<9);
+}
 function makeParty():Party {
-  return {x:36,z:-23,heading:Math.PI,active:0,formation:[0,1,2],hp:100,maxHp:100,bond:BONDS[0],
+  return {x:36,z:-23,heading:Math.PI,active:0,formation:[0,1,2],positions:[0,4,2],linkStyle:'Wedge',hp:100,maxHp:100,bond:BONDS[0],
     attackCooldown:0,switchCooldown:0,dodgeCooldown:0,parryCooldown:0,guard:0,invulnerable:0};
 }
 function makeRaid():Raid {
@@ -95,7 +109,7 @@ function makeRaid():Raid {
 function makeState():GameState {
   const event:GameEvent = {id:0,type:'ui',label:''};
   return {mode:1,started:false,clock:0,day:1,hour:15.62,weather:'clear',rank:0,stock:{alloy:32,ore:6,cores:0},
-    rover:{x:0,z:0,heading:0,speed:0,vx:0,vz:0,drift:0},party:makeParty(),boss:makeBoss(),raid:makeRaid(),report:null,
+    rover:{x:0,z:0,heading:-2.56,speed:0,vx:0,vz:0,drift:0},party:makeParty(),boss:makeBoss(),raid:makeRaid(),report:null,
     nodes:[makeNode(1,'generator',1,3),makeNode(2,'relay',2,3),makeNode(3,'extractor',3,2),makeNode(4,'belt',3,3),makeNode(5,'refinery',3,4)],
     links:[],power:{supply:0,demand:0,used:0,rate:0,oreRate:0},caches:makeCaches(),delivery:{active:false,timeLeft:0,reward:10},buildKind:'relay',event,events:[],cycles:0,
     fx:{hit:0,parry:0,shake:0,attack:0,dodge:0,switch:0,finish:0,hitstop:0,hurt:0,resonance:0}};
@@ -207,6 +221,7 @@ export class Game {
         s.report=null;this.setMode(2);return true;
       case 'interact': return this.interact();
       case 'formation': return this.formation(payload);
+      case 'position': return this.position(payload);
       case 'switch': return this.switchOperator(payload);
       case 'attack': return this.attack();
       case 'parry': return this.parry();
@@ -338,13 +353,26 @@ export class Game {
     const reserve=Math.min(18,Math.max(0,s.power.supply-s.power.used)*2);
     s.delivery.active=false;
     s.raid={...makeRaid(),active:true,timeLeft:110+reserve};
-    const formation=[...s.party.formation];
-    s.party={...makeParty(),formation,active:formation[0],bond:BONDS[formation[0]],maxHp:100+s.rank*12,hp:100+s.rank*12};
+    const formation=[...s.party.formation],positions=[...s.party.positions];
+    s.party={...makeParty(),formation,positions,linkStyle:formationStyle(positions),active:formation[0],bond:BONDS[formation[0]],maxHp:100+s.rank*12,hp:100+s.rank*12};
     s.boss=makeBoss();
     s.boss.maxHp+=Math.min(s.cycles,6)*8;s.boss.hp=s.boss.maxHp;
     for(const cache of s.caches) if(cache.night) cache.claimed=false;
     this.lastElement=-1;this.resonanceTime=0;this.lastMotion={x:0,z:-1};
     this.setMode(4);this.emit('raid','Night sortie deployed');this.save();return true;
+  }
+  private position(payload:unknown) {
+    const s=this.state;
+    if(s.raid.active) return this.denied('Deployment locked on sortie');
+    if(!payload||typeof payload!=='object'||!('operator' in payload)||!('cell' in payload)) return false;
+    const {operator,cell}=payload;
+    if(!finite(operator)||!Number.isInteger(operator)||operator<0||operator>=3) return false;
+    if(!finite(cell)||!Number.isInteger(cell)||cell<0||cell>=9) return false;
+    const positions=s.party.positions,occupied=positions.indexOf(cell);
+    if(occupied===operator)return true;
+    if(occupied>=0)positions[occupied]=positions[operator];
+    positions[operator]=cell;s.party.linkStyle=formationStyle(positions);
+    this.emit('ui',s.party.linkStyle+' deployment');this.save();return true;
   }
   private formation(payload:unknown) {
     const s=this.state;
@@ -393,10 +421,13 @@ export class Game {
     const critical=b.stage==='stunned'||b.stage==='recover';
     const reacts=this.lastElement>=0&&this.lastElement!==p.active&&this.resonanceTime>0;
     let amount=op.power*(1+s.rank*.08)*(critical?1.32:1);
+    let stagger=op.id===2?13:7;
     if(reacts) {
       amount+=p.bond==='Induction'?19:12;
-      b.poise+=p.bond==='Overpressure'?32:22;s.fx.resonance=1;
-    } else b.poise+=op.id===2?13:7;
+      stagger=p.bond==='Overpressure'?32:22;s.fx.resonance=1;
+    }
+    if(p.linkStyle==='Line')amount*=1.08;
+    b.poise+=stagger*(p.linkStyle==='Wedge'?1.12:1);
     this.lastElement=p.active;this.resonanceTime=p.bond==='Induction'?4:3;
     this.damageBoss(amount,reacts?'resonance':'hit',reacts?'Resonance · '+op.element:op.element+' impact');
     return true;
@@ -453,17 +484,28 @@ export class Game {
       if(b.stage!=='broken') this.setStage('stunned',2.1);
       s.fx.hitstop=.115;return;
     }
-    const armor=p.active===0?.82:1;
-    p.hp=Math.max(0,p.hp-move.damage*(1+(b.phase-1)*.12)*armor);
+    const armor=(p.active===0?.82:1)*(p.linkStyle==='Dispersed'?.85:1);
+    const taken=move.damage*(1+(b.phase-1)*.12)*armor;
+    p.hp=Math.max(0,p.hp-taken);
     p.invulnerable=.48;s.fx.hurt=1;s.fx.shake=.85;s.fx.hitstop=.055;
-    this.emit('hurt',move.damage+' impact received');
+    this.emit('hurt',Math.round(taken)+' impact received');
     if(p.hp<=0)this.settle(false,'Squad down');
+  }
+  private chooseBossMove():BossMove {
+    const {boss:b,party:p}=this.state,range=dist(b,p);
+    if(range>8.5) return 'lunge';
+    if(p.guard>0&&range<=MOVES.slam.range) return 'slam';
+    // After its first armour break the warden counters the most recent attacking operator.
+    if(b.phase>=2 && this.resonanceTime>0) {
+      if(this.lastElement===1&&range>4.8) return 'lunge';
+      if(this.lastElement===2&&range<=MOVES.sweep.range) return 'sweep';
+    }
+    const sequence=PHASE_MOVES[b.phase-1];
+    return sequence[b.attackIndex%sequence.length];
   }
   private beginWindup() {
     const s=this.state,b=s.boss,p=s.party;
-    const sequence=PHASE_MOVES[b.phase-1];
-    const selected=sequence[b.attackIndex%sequence.length];
-    b.move=dist(b,p)>8.5?'lunge':selected;
+    b.move=this.chooseBossMove();
     b.attackIndex++;b.range=MOVES[b.move].range;b.heading=direction(b,p);b.targetX=p.x;b.targetZ=p.z;
     this.setStage('windup',MOVES[b.move].windup/(1+(b.phase-1)*.12));
     this.emit('warning','Warden · '+b.move);
@@ -512,6 +554,7 @@ export class Game {
       s.fx[key]=Math.max(0,s.fx[key]-dt*decay);
     }
     if(s.fx.hitstop>0){s.fx.hitstop=Math.max(0,s.fx.hitstop-dt);return}
+    if(s.raid.active && s.mode<3)return;
     if(!s.started && s.mode===1)return;
     if(s.mode===2 && input.forward) s.started=true;
     this.saveTimer+=dt;
@@ -592,14 +635,26 @@ export class Game {
     r.x=clamp(nextX,-52,56);r.z=clamp(nextZ,-55,45);
     if(nextX!==r.x)r.vx=0;
     if(nextZ!==r.z)r.vz=0;
-    // Project out of solid foundations and remove only the inward velocity component.
-    for(const site of LOCATIONS){
-      const d=dist(site,r),radius=site.radius+.82;
-      if(d>=radius)continue;
-      const nx=d>.001?(r.x-site.x)/d:1,nz=d>.001?(r.z-site.z)/d:0;
-      r.x=site.x+nx*radius;r.z=site.z+nz*radius;
-      const impact=r.vx*nx+r.vz*nz;
-      if(impact<0){r.vx-=nx*impact*1.12;r.vz-=nz*impact*1.12;if(impact< -5)s.fx.shake=.3}
+    // A three-disc capsule follows the wheelbase and catches corners before the hull clips a wall.
+    const radius=1.05;
+    for(const offset of [-1.66,0,1.66]){
+      for(const lot of DISTRICT_FOOTPRINTS){
+        const cx=r.x+offset*ns,cz=r.z+offset*nc;
+        if(cx<lot.minX-radius||cx>lot.maxX+radius||cz<lot.minZ-radius||cz>lot.maxZ+radius)continue;
+        const dx=cx-clamp(cx,lot.minX,lot.maxX),dz=cz-clamp(cz,lot.minZ,lot.maxZ);
+        const distance=Math.hypot(dx,dz);
+        if(distance>=radius)continue;
+        let nx=0,nz=0,push=radius-distance;
+        if(distance>.0001){nx=dx/distance;nz=dz/distance;}
+        else {
+          const xDepth=lot.width*.5-Math.abs(cx-lot.x),zDepth=lot.depth*.5-Math.abs(cz-lot.z);
+          if(xDepth<zDepth){nx=cx<lot.x?-1:1;push=radius+xDepth;}
+          else {nz=cz<lot.z?-1:1;push=radius+zDepth;}
+        }
+        r.x+=nx*push;r.z+=nz*push;
+        const impact=r.vx*nx+r.vz*nz;
+        if(impact<0){r.vx-=nx*impact*1.05;r.vz-=nz*impact*1.05;if(impact< -5)s.fx.shake=.3;}
+      }
     }
     r.speed=r.vx*ns+r.vz*nc;
     const slip=r.vx*nc-r.vz*ns;
@@ -611,6 +666,7 @@ export class Game {
     // Per-run combat data is saved with base inventory to keep unbanked salvage separate on reload.
     const data={v:1,started:s.started,mode:s.mode,day:s.day,hour:s.hour,rank:s.rank,stock:s.stock,
       rover:s.rover,party:s.party,boss:s.boss,raid:s.raid,report:s.report,nodes:s.nodes,
+      combatMemory:{lastElement:this.lastElement,resonanceTime:this.resonanceTime},
       caches:s.caches.map(c=>[c.id,c.claimed]),delivery:s.delivery,buildKind:s.buildKind,cycles:s.cycles};
     try{this.storage.setItem(SAVE,JSON.stringify(data))}catch{/* A full or private store keeps the session in memory. */}
   }
@@ -641,6 +697,8 @@ export class Game {
       if(isKind(d.buildKind))s.buildKind=d.buildKind;
       if(Array.isArray(d.caches))for(const c of s.caches)c.claimed=d.caches.some((a:unknown)=>Array.isArray(a)&&a[0]===c.id&&a[1]===true);
       for(const k of ['x','z','heading','vx','vz','speed','drift'] as const) if(finite(d.rover[k]))s.rover[k]=d.rover[k];
+      if(validPositions(d.party.positions)) s.party.positions=[...d.party.positions];
+      s.party.linkStyle=formationStyle(s.party.positions);
       s.party.formation=formation;s.party.active=formation.includes(active)?active:formation[0];
       s.party.bond=BONDS[formation[0]];s.party.hp=s.party.maxHp=100+s.rank*12;
       if(d.raid?.active&&d.boss&&finite(d.raid.timeLeft)&&finite(d.boss.hp)&&finite(d.party.hp)) {
@@ -651,6 +709,9 @@ export class Game {
         };
         numeric(s.boss,d.boss);s.boss.stage=d.boss.stage;s.boss.move=d.boss.move;
         numeric(s.party,d.party);s.party.active=formation.includes(active)?active:formation[0];
+        if(Number.isInteger(d.combatMemory?.lastElement)&&finite(d.combatMemory?.resonanceTime)){
+          this.lastElement=clamp(d.combatMemory.lastElement,-1,2);this.resonanceTime=clamp(d.combatMemory.resonanceTime,0,4);
+        }
         numeric(s.raid,d.raid);s.raid.active=true;s.raid.evacuating=!!d.raid.evacuating;s.raid.bossDown=!!d.raid.bossDown;
       } else if(d.report&&typeof d.report.success==='boolean'&&finite(d.report.alloy)&&finite(d.report.cores)&&typeof d.report.reason==='string') s.report=d.report;
     }catch{/* A damaged or earlier save can always open a fresh district. */}
