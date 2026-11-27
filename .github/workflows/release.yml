@@ -1,0 +1,21 @@
+name: Publish private acceptance downloads
+on:
+  push:
+    branches: ['qa/artifacts']
+permissions:
+  contents: write
+jobs:
+  publish:
+    if: github.event.repository.private == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify files and publish the tested revision as a prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: cd251bb7a340fa0862e86188d65e72191a839094
+          TAG: v1.0.0-rc.1
+        run: |
+          sha256sum --check SHA256SUMS
+          grep -F "$SOURCE_SHA" Acceptance-Report.md > /dev/null
+          gh release create "$TAG" Dust-Division.html dust-division-web.zip dust-division-acceptance.zip visual-review.jpg Acceptance-Report.md --target "$SOURCE_SHA" --prerelease --title 'Dust Division · 私有验收构建' --notes-file README.md
