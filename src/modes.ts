@@ -45,7 +45,7 @@ const dashTime = (seconds: number) => {
 
 function city() {
   return `<section class="mh-page mh-city" aria-label="City district">
-    <div class="mh-tl"><div class="city-eyeline mh-cap">Municipal atlas</div><h1 class="city-title">Quarry <em>District</em></h1></div>
+    <div class="mh-tl"><div class="city-eyeline mh-cap"><span>Municipal atlas <span class="caption-separator" aria-hidden="true">·</span> <span class="eyeline-zh" lang="zh-CN">城区图志</span></span></div><h1 class="city-title" aria-label="Quarry District" aria-describedby="city-name-zh"><span class="city-title-en">Quarry <em>District</em></span><small class="city-title-zh" id="city-name-zh" lang="zh-CN">采石区</small></h1></div>
     <div class="mh-tr city-time"><div class="mh-cap">${icon('sun')}Local time</div><strong data-ui="clock"></strong><div class="mh-cap" data-ui="weather"></div></div>
     <div class="mh-places">${LOCATIONS.map((place) => `<button class="mh-place" data-district="${place.id}" title="Access ${place.name}" aria-label="Access ${place.name}"><span class="place-flag">${icon(place.id)}</span><span class="place-name">${place.name}</span></button>`).join('')}</div>
     <div class="mh-bl city-stores"><p class="mh-cap">District stores</p><dl>${['alloy', 'ore', 'cores'].map((k) => `<div><dt>${k.toUpperCase()}</dt><dd data-ui="${k}"></dd></div>`).join('')}</dl></div>
@@ -61,7 +61,7 @@ function plant() {
   }).join('')
   return `<section class="mh-page mh-industry" aria-label="Industrial construction">
     <svg class="mh-plot" aria-label="Construction field, arrow keys to move and Enter to place">${cells}</svg>
-    <div class="mh-tl"><div class="industry-eyeline mh-cap">Network control</div><h1 class="industry-title">Fabrication</h1>
+    <div class="mh-tl"><div class="industry-eyeline mh-cap"><span>Network control <span class="caption-separator" aria-hidden="true">·</span> <span class="eyeline-zh" lang="zh-CN">管网调度</span></span></div><h1 class="industry-title" aria-label="Fabrication" aria-describedby="industry-name-zh"><span class="industry-title-en">Fabrication</span><small class="industry-title-zh" id="industry-name-zh" lang="zh-CN"><span aria-hidden="true">/ </span>工业筑造</small></h1>
     <svg class="industry-ticks" aria-hidden="true"><defs><pattern id="plant-scale" width="7" height="8" patternUnits="userSpaceOnUse"><path d="M1 0v4" stroke="currentColor" stroke-width="1"/></pattern></defs><rect width="100%" height="8" fill="url(#plant-scale)"/></svg>
     <div class="industry-grid-readout"><span>07 × 07</span><span>/</span><span data-ui="output-rate"></span></div></div>
     <div class="mh-tr industry-power" data-ui="load"><p class="mh-cap">Grid load ${icon('generator')}</p><div class="industry-power-read"><strong data-ui="used"></strong><small data-ui="supply"></small></div><div class="industry-power-track" data-ui="power-bars">${gauge(20)}</div></div>
@@ -84,7 +84,7 @@ function raid() {
 
 function battle() {
   return `<section class="mh-page mh-battle" aria-label="Warden encounter and squad formation">
-    <div class="mh-tl"><p class="battle-ident mh-cap">${icon('warning')}<span data-ui="arena-status"></span></p><h1 class="battle-title">Quarry <span>Warden</span></h1>
+    <div class="mh-tl"><p class="battle-ident mh-cap">${icon('warning')}<span data-ui="arena-status"></span></p><h1 class="battle-title" aria-label="Quarry Warden" aria-describedby="battle-name-zh"><span class="battle-title-en">Quarry <span>Warden</span></span><small class="battle-title-zh" id="battle-name-zh" lang="zh-CN">采石镇守</small></h1>
     <div class="boss-line"><progress data-ui="boss-bar" max="100" value="100" aria-label="Warden integrity"></progress><span data-ui="boss-pct"></span></div></div>
     <div class="mh-tr battle-scope" data-ui="scope"><div class="scope-head mh-cap"><span>Telemetry</span><span data-ui="phase"></span></div>
     <svg viewBox="0 0 220 42" preserveAspectRatio="none" aria-hidden="true"><path class="scope-grid" stroke-dasharray="1 4" d="M0 6H220M0 21H220M0 36H220"/><path class="scope-wave" data-ui="scope-path"/></svg>
@@ -148,7 +148,7 @@ export function createModes(
   let previousHeroStyle = ''
   let entering: HTMLElement | null = null
   let sweep: HTMLElement | null = null
-  let industryHandoff: HTMLElement | null = null
+  let handoff: { host: HTMLElement; attribute: string; animation: string } | null = null
   let exitTimer: ReturnType<typeof setTimeout> | undefined
   let sweepTimer: ReturnType<typeof setTimeout> | undefined
   let selectedCell = -1
@@ -217,30 +217,26 @@ export function createModes(
     entering = null
     sweep?.remove()
     sweep = null
-    if (industryHandoff) {
-      industryHandoff.removeEventListener('animationend', finishIndustryHandoff)
-      industryHandoff.removeEventListener('animationcancel', finishIndustryHandoff)
-      industryHandoff.removeAttribute('data-industry-handoff')
-      industryHandoff = null
+    if (handoff) {
+      handoff.host.removeEventListener('animationend', finishHandoff)
+      handoff.host.removeEventListener('animationcancel', finishHandoff)
+      handoff.host.removeAttribute(handoff.attribute)
+      handoff = null
     }
   }
-  function industryScanIsActive() {
-    return industryHandoff
-      ?.getAnimations?.()
+  function handoffIsActive() {
+    return handoff?.host
+      .getAnimations?.()
       .some(
         (animation) =>
           'animationName' in animation &&
-          animation.animationName === 'dd-industry-handoff' &&
+          animation.animationName === handoff?.animation &&
           (animation.playState === 'running' || animation.playState === 'paused'),
       )
   }
-  function finishIndustryHandoff(event: AnimationEvent) {
-    // A canceled animation's queued event can arrive after a subsequent switch to industry.
-    if (
-      event.target === industryHandoff &&
-      event.animationName === 'dd-industry-handoff' &&
-      !industryScanIsActive()
-    ) {
+  function finishHandoff(event: AnimationEvent) {
+    // A canceled animation's queued event can arrive after a subsequent switch to the same target.
+    if (event.target === handoff?.host && event.animationName === handoff?.animation && !handoffIsActive()) {
       endTransition()
     }
   }
@@ -251,7 +247,7 @@ export function createModes(
     endTransition()
     const previous = page === '' ? overworld : (root.firstElementChild as HTMLElement | null)
     const animate = page !== undefined && !motionPreference?.matches && (options.motionEnabled?.() ?? true)
-    const enteringIndustry = animate && game.state.mode === 3
+    const handoffKind = !animate ? null : next === 'city' ? 'city' : game.state.mode === 3 ? 'industry' : null
     const focused = document.activeElement
     if (
       (previous?.contains(focused) || (next === 'city' && focused?.closest('#modes-nav'))) &&
@@ -282,8 +278,8 @@ export function createModes(
       outgoing.dataset.from = page === '' ? '1' : page === 'city' ? '2' : page === 'battle' ? '4' : '3'
       outgoing.inert = true
       outgoing.setAttribute('aria-hidden', 'true')
-      // An industrial scan releases its source on the master animation's last frame.
-      if (!enteringIndustry) exitTimer = setTimeout(releasePrevious, 180)
+      // Coordinated cuts release their source on the shared animation's last frame.
+      if (!handoffKind) exitTimer = setTimeout(releasePrevious, 180)
     }
     if (shell) shell.dataset.mode = String(game.state.mode)
     if (overworld) overworld.hidden = next !== '' && outgoing !== overworld
@@ -309,7 +305,7 @@ export function createModes(
     if (animate) {
       entering = next === '' ? (overworld ?? null) : (root.firstElementChild as HTMLElement | null)
       entering?.classList.add('hud-entering')
-      if (!enteringIndustry) root.firstElementChild?.classList.add('mh-page-enter')
+      if (!handoffKind) root.firstElementChild?.classList.add('mh-page-enter')
       sweep = document.createElement('div')
       sweep.className = 'mode-sweep'
       sweep.dataset.to = String(game.state.mode)
@@ -324,14 +320,18 @@ export function createModes(
       sweep.append(mark)
       const sweepHost = shell ?? container
       sweepHost.append(sweep)
-      if (enteringIndustry) {
-        industryHandoff = sweepHost
-        industryHandoff.setAttribute('data-industry-handoff', '')
-        industryHandoff.addEventListener('animationend', finishIndustryHandoff)
-        industryHandoff.addEventListener('animationcancel', finishIndustryHandoff)
+      if (handoffKind) {
+        handoff = {
+          host: sweepHost,
+          attribute: `data-${handoffKind}-handoff`,
+          animation: `dd-${handoffKind}-handoff`,
+        }
+        sweepHost.setAttribute(handoff.attribute, '')
+        sweepHost.addEventListener('animationend', finishHandoff)
+        sweepHost.addEventListener('animationcancel', finishHandoff)
         // An unavailable stylesheet can leave no end event. Preserve a paused or delayed live cut.
         sweepTimer = setTimeout(() => {
-          if (!industryScanIsActive()) endTransition()
+          if (!handoffIsActive()) endTransition()
         }, 430)
       } else sweepTimer = setTimeout(endTransition, 430)
     }

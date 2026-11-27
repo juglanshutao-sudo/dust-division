@@ -1189,3 +1189,198 @@
 .mh-city .city-title {
   font-size: clamp(47px, 6.7vw, 108px);
 }
+
+/* Keep the bilingual labels on the existing title baseline and preserve the surveyed ground behind the heading. */
+.eyeline-zh {
+  font-family: var(--zh-sans, sans-serif);
+  letter-spacing: 0.11em;
+}
+.caption-separator {
+  padding-inline: 0.1em;
+}
+.mh-city .city-title {
+  display: grid;
+  grid-template-columns: max-content;
+  align-items: baseline;
+}
+.city-title-en,
+.city-title-zh {
+  grid-area: 1 / 1;
+  white-space: nowrap;
+}
+.city-title-en {
+  padding-inline-end: clamp(35px, 2.8vw, 43px);
+  transform: scaleX(0.95);
+  transform-origin: left bottom;
+}
+.city-title-zh {
+  justify-self: end;
+  padding: 2px 4px 3px 5px;
+  border-radius: 0;
+  background: #0a2463;
+  color: #f4efe6;
+  font: 500 clamp(10px, 0.15em, 16px) / 1 var(--zh-serif, serif);
+  letter-spacing: 0.1em;
+}
+.mh-industry:not(.mh-raid) .industry-title {
+  display: flex;
+  align-items: baseline;
+  column-gap: 6px;
+  white-space: nowrap;
+  --en-fit: 0.762;
+}
+.industry-title-en {
+  /* Barlow Condensed's FABRICATION cap run spans 4.33em. Reclaim slightly
+     less advance than the optical compression so the gutter always stays open. */
+  transform: scaleX(var(--en-fit));
+  transform-origin: left bottom;
+  margin-inline-end: calc((var(--en-fit) - 1) * 4.26em);
+}
+.industry-title-zh {
+  color: #1e2022;
+  font: 600 clamp(10px, 0.167em, 13px) / 1 var(--zh-sans, sans-serif);
+  letter-spacing: 0.09em;
+}
+.industry-title-zh > span {
+  font-family: var(--mh-mono);
+  letter-spacing: 0;
+}
+.battle-title > .battle-title-en {
+  display: inline-block;
+  color: inherit;
+}
+.battle-title-zh {
+  display: inline-block;
+  margin-inline-start: 0.63em;
+  padding-inline-start: 0.48em;
+  border-left: 2px solid #b8332a;
+  color: #ece8df;
+  white-space: nowrap;
+  font: 600 clamp(11px, 0.175em, 18px) / 1 var(--zh-serif, serif);
+  letter-spacing: 0.12em;
+}
+@media (max-width: 900px), (min-width: 1500px) {
+  .mh-industry:not(.mh-raid) .industry-title {
+    --en-fit: 0.9;
+  }
+}
+@media (max-width: 600px) {
+  .battle-title {
+    position: relative;
+  }
+  .battle-title-zh {
+    position: absolute;
+    top: calc(100% + 9px);
+    left: 141px;
+    margin-inline-start: 0;
+    font-size: 10px;
+  }
+}
+@media (max-width: 360px) {
+  .mh-city .city-title {
+    font-size: clamp(37px, 11.6vw, 42px);
+  }
+  .mh-industry:not(.mh-raid) .industry-title {
+    --en-fit: 0.77;
+  }
+  .battle-title-en {
+    transform: scaleX(0.92);
+    transform-origin: left bottom;
+    margin-inline-end: -0.41em;
+  }
+  .battle-title-zh {
+    left: 139px;
+    border-left-width: 1px;
+    padding-inline-start: 3px;
+    font-size: 9.5px;
+    letter-spacing: 0.08em;
+  }
+}
+
+/* Fixed line boxes keep the atlas and dial marks aligned across fallback fonts. */
+.city-eyeline {
+  height: 1.3em;
+}
+.mh-city .city-title {
+  height: 0.83em;
+}
+.mh-industry:not(.mh-raid) .industry-eyeline {
+  height: calc(max(12px, 1.3em) + 8px);
+}
+.mh-industry:not(.mh-raid) .industry-title {
+  height: 1.04em;
+}
+@media (min-width: 901px) and (max-width: 1240px) and (max-height: 760px) {
+  .mh-city > .mh-tl {
+    top: calc(clamp(20px, 4vh, 48px) - 3px);
+  }
+}
+@media (min-width: 601px) and (max-height: 550px) {
+  .mh-city > .mh-tl {
+    top: 4px;
+  }
+  .mh-city .city-title {
+    font-size: 42px;
+    margin-top: 2px !important;
+  }
+}
+@media (max-width: 440px) and (max-height: 780px) {
+  .mh-industry:not(.mh-raid) > .mh-tl {
+    top: clamp(6px, calc(2.5vw - 2px), 7px);
+  }
+  .mh-industry:not(.mh-raid) .industry-eyeline {
+    display: flex;
+    width: max-content;
+    gap: 5px;
+    padding: 1px 0;
+    height: 15px;
+    font-size: 8px;
+    letter-spacing: 0.065em;
+  }
+  .mh-industry:not(.mh-raid) .industry-title {
+    --en-fit: 0.714;
+    font-size: clamp(26px, calc(20vw - 38px), 33px);
+    column-gap: 4px;
+    margin-top: 2px !important;
+  }
+  .industry-title-zh {
+    font-size: clamp(9.5px, 2.92vw, 10.5px);
+  }
+  .mh-industry:not(.mh-raid) .industry-ticks {
+    height: 5px;
+    margin-top: 3px;
+  }
+  .industry-grid-readout {
+    margin-top: 2px;
+    gap: 5px;
+    font-size: 9px;
+    line-height: 1.2;
+  }
+}
+@media (max-width: 345px) and (max-height: 670px) {
+  .mh-industry:not(.mh-raid) .industry-title {
+    --en-fit: 0.702;
+  }
+  .mh-city > .mh-tl {
+    top: 3px;
+  }
+  .mh-city .city-title {
+    font-size: clamp(33px, 10.86vw, 36px);
+    margin-top: 9px !important;
+  }
+}
+
+@media (max-width: 420px) {
+  .city-time [data-ui='weather'] {
+    position: absolute;
+    top: max(calc(100% + 3px), calc(40px + 9vw));
+    right: 0;
+    white-space: nowrap;
+    text-align: right;
+  }
+}
+@media (max-width: 345px) and (max-height: 670px) {
+  .city-time [data-ui='weather'] {
+    top: calc(100% + 3px);
+  }
+}

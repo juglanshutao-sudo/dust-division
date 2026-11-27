@@ -6,10 +6,12 @@ import { tmpdir } from 'node:os'
 import { extname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import { verifyBilingual } from './verify-bilingual.mjs'
 import { verifyTitleGround } from './verify-title-ground.mjs'
 import {
   verifyOverworldChrome,
   verifyModeMotion,
+  verifyCityCut,
   verifyIndustryCaption,
   captureIndustryCut,
   watchCombatHUD,
@@ -82,6 +84,7 @@ const report = {
   renderErrors: [],
   pixelChecks: [],
   titleGround: [],
+  bilingual: [],
 }
 let browser,
   page,
@@ -150,10 +153,7 @@ const sceneProbes = {
   '04-industry': { region: [0.22, 0.26, 0.78, 0.75], changed: 0.45 },
   '04-industry-low': { region: [0.22, 0.26, 0.78, 0.75], changed: 0.45 },
 }
-async function checkScenePixels(name) {
-  const probe = sceneProbes[name]
-  if (!probe) return
-  const canvas = page.locator('#world')
+async function settleCamera() {
   // Let the camera converge and enter the static geometry cache. Both a minimum
   // number of presented frames and elapsed time matter on the CI software adapter.
   await page.evaluate(
@@ -174,6 +174,12 @@ async function checkScenePixels(name) {
         requestAnimationFrame(frame)
       }),
   )
+}
+async function checkScenePixels(name) {
+  const probe = sceneProbes[name]
+  if (!probe) return
+  const canvas = page.locator('#world')
+  await settleCamera()
   const bounds = await canvas.boundingBox()
   assert.ok(bounds && bounds.width > 0 && bounds.height > 0, 'World canvas must have visible bounds')
   const [left, top, right, bottom] = probe.region
@@ -274,6 +280,10 @@ async function verifyLowTier() {
 }
 async function capture(name) {
   await checkScenePixels(name)
+  const titleMode = { '01-hero': 1, '03-city': 2, '04-industry': 3, '05-formation': 4, '09-mobile-hero': 1 }[
+    name
+  ]
+  if (titleMode) report.bilingual.push(await verifyBilingual(page, titleMode))
   if (name === '03-city' || name === '04-industry') {
     report.titleGround.push(await verifyTitleGround(page, name, output))
   }
@@ -393,13 +403,15 @@ try {
     await capture('02-driving')
     await page.keyboard.press('r')
     await button(/ENTER SECTOR/i).waitFor()
+    report.bilingual.push(await verifyBilingual(page, 1))
   })
   await check('Opened the city and entered its Switchyard', async () => {
     await pressMode(2, /Quarry District/i)
     await capture('03-city')
     await page.locator('button[data-district="yard"]').click()
     await page.getByRole('heading', { name: 'Fabrication' }).waitFor()
-    await pressMode(2, /Quarry District/i)
+    report.reverseCityCut = await verifyCityCut(page, 3)
+    await page.locator('.mode-sweep').waitFor({ state: 'detached' })
     await pressMode(3, 'Fabrication')
   })
   await check('Placed and reclaimed a live power module', async () => {
@@ -607,6 +619,34 @@ try {
     await button('Export JSON').waitFor()
     assert.match(await page.locator('.sample-result').innerText(), /FPS · P95/)
     await button('Close dialog').click()
+  })
+  await check('Kept the mobile bilingual titles inside their HUDs and above open survey ground', async () => {
+    for (const [mode, heading] of [
+      [2, /Quarry District/i],
+      [3, 'Fabrication'],
+      [4, /Quarry Warden/i],
+    ]) {
+      await pressMode(mode, heading)
+      await page.locator('.hud-leaving').waitFor({ state: 'detached' })
+      await settleCamera()
+      report.bilingual.push(await verifyBilingual(page, mode))
+      if (mode === 2 || mode === 3) {
+        const scene = mode === 2 ? 'mobile-city' : 'mobile-industry'
+        report.titleGround.push(await verifyTitleGround(page, scene, output))
+      }
+    }
+  })
+  await check('Fit the bilingual grid and combat titles on compact and landscape phones', async () => {
+    for (const [width, height, modes] of [
+      [320, 568, [2, 3, 4]],
+      [844, 390, [2, 3]],
+    ]) {
+      await page.setViewportSize({ width, height })
+      for (const mode of modes) {
+        await pressMode(mode, { 2: /Quarry District/i, 3: 'Fabrication', 4: /Quarry Warden/i }[mode])
+        report.bilingual.push(await verifyBilingual(page, mode))
+      }
+    }
   })
   await check('Staged the synchronized city-to-industry cut at phone width', async () => {
     const url = page.url()

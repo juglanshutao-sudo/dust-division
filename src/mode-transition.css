@@ -64,24 +64,48 @@
   }
 }
 
-/* One oblique atlas panel and its two registration edges. */
+/* The yellow edge and both cut polygons use x(y) = intercept + tan(-23°) × y.
+   Each HUD resolves its own top and bottom in terminal coordinates. The polygon
+   endpoints intentionally extend past the viewport as the seam enters and leaves. */
+@property --dd-city-x {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 0px;
+}
+[data-city-handoff] {
+  --dd-city-angle: -23deg;
+  --dd-city-width: clamp(38px, 6vw, 105px);
+  animation: dd-city-handoff 180ms cubic-bezier(0.32, 0.12, 0.44, 1) both;
+}
+@keyframes dd-city-handoff {
+  from {
+    --dd-city-x: calc(100vw - tan(var(--dd-city-angle)) * 100dvh + 3px);
+  }
+  to {
+    --dd-city-x: calc(0px - var(--dd-city-width) - 3px);
+  }
+}
 .mode-sweep[data-to='2'] [data-wipe] {
   left: 0;
-  top: -20%;
-  bottom: -20%;
-  width: clamp(38px, 6vw, 105px);
+  top: 0;
+  bottom: 0;
+  width: var(--dd-city-width);
   background: rgb(244 239 230 / 42%);
   border-left: 3px solid #ffe600;
   border-right: 1px solid #0a2463;
-  animation: dd-city-scan 370ms cubic-bezier(0.3, 0.13, 0.47, 0.99) both;
+  transform-origin: 0 0;
+  transform: translateX(calc(var(--dd-city-x) - 1.5px)) skewX(var(--dd-city-angle));
 }
-@keyframes dd-city-scan {
-  from {
-    transform: translateX(calc(100vw + 42vh)) skewX(-23deg);
-  }
-  to {
-    transform: translateX(calc(-110px - 42vh)) skewX(-23deg);
-  }
+[data-city-handoff] :is(.hud-leaving, .hud-entering) {
+  --dd-city-top-x: calc(var(--dd-city-x) + tan(var(--dd-city-angle)) * var(--hud-top, 76px));
+  --dd-city-bottom-x: calc(var(--dd-city-x) + tan(var(--dd-city-angle)) * (100dvh - var(--hud-bottom, 46px)));
+  animation: none;
+}
+[data-city-handoff] .hud-leaving {
+  clip-path: polygon(0 0, var(--dd-city-top-x) 0, var(--dd-city-bottom-x) 100%, 0 100%);
+}
+[data-city-handoff] .hud-entering {
+  clip-path: polygon(var(--dd-city-top-x) 0, 100% 0, 100% 100%, var(--dd-city-bottom-x) 100%);
 }
 
 /* A safety-orange horizontal scanline and separated edge ticks. */

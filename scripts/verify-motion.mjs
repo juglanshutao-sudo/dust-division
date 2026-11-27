@@ -116,6 +116,150 @@ export async function verifyIndustryCaption(page) {
   return caption
 }
 
+/** Sample the browser's real mask polygons and transformed yellow border in screen coordinates. */
+export async function verifyCityCut(page, from) {
+  await page.locator('.mode-sweep').waitFor({ state: 'detached' })
+  const probe = await page.evaluateHandle(
+    (fromMode) => ({
+      result: new Promise((resolve, reject) => {
+        const shell = document.querySelector('#terminal')
+        const observer = new MutationObserver(() => {
+          const clock = shell.getAnimations().find((a) => a.animationName === 'dd-city-handoff')
+          if (!clock) return
+          observer.disconnect()
+          clearTimeout(timeout)
+          const original = clock.currentTime ?? 0
+          try {
+            const old = shell.querySelector('.hud-leaving[data-from="' + fromMode + '"]')
+            const incoming = shell.querySelector('.mh-city.hud-entering')
+            const stripe = shell.querySelector('.mode-sweep[data-to="2"] [data-wipe]')
+            const control = [...old.querySelectorAll('button:not([disabled])')].find(
+              (b) => b.getClientRects().length,
+            )
+            control?.focus({ preventScroll: true })
+            const duration = Number(clock.effect.getTiming().duration)
+            function polygon(el) {
+              const rect = el.getBoundingClientRect()
+              const clip = getComputedStyle(el).clipPath
+              if (!clip.startsWith('polygon(')) throw Error('Expected a diagonal HUD mask: ' + clip)
+              function length(value, extent) {
+                if (!/^-?[\d.]+(?:px|%)?$/.test(value)) throw Error('Unresolved polygon coordinate: ' + value)
+                return parseFloat(value) * (value.endsWith('%') ? extent / 100 : 1)
+              }
+              const points = clip
+                .slice(8, -1)
+                .split(',')
+                .map((point) => {
+                  const [x, y] = point.trim().split(/\s+/)
+                  return [rect.left + length(x, rect.width), rect.top + length(y, rect.height)]
+                })
+              return { rect, points }
+            }
+            function interval(mask, y) {
+              const xs = []
+              mask.points.forEach(([x1, y1], i) => {
+                const [x2, y2] = mask.points[(i + 1) % mask.points.length]
+                if (y > Math.min(y1, y2) && y < Math.max(y1, y2))
+                  xs.push(x1 + ((x2 - x1) * (y - y1)) / (y2 - y1))
+              })
+              if (xs.length !== 2) throw Error('Expected two mask intersections, got ' + JSON.stringify(xs))
+              return xs
+                .sort((a, b) => a - b)
+                .map((x) => Math.min(mask.rect.right, Math.max(mask.rect.left, x)))
+            }
+            const store = incoming.querySelector('.city-stores').getBoundingClientRect()
+            const tool = old.querySelector('.plant-dock')?.getBoundingClientRect()
+            const samples = []
+            clock.pause()
+            for (const portion of [0.06, 0.17, 0.28, 0.39, 0.5, 0.61, 0.72, 0.83, 0.94]) {
+              clock.currentTime = duration * portion
+              const a = polygon(old),
+                b = polygon(incoming)
+              const band = stripe.getBoundingClientRect(),
+                style = getComputedStyle(stripe)
+              const shear = new DOMMatrix(style.transform).c
+              // Negative skew puts the upper-left border at bbox.right minus its unsheared width.
+              const stripeAtTop = band.right - parseFloat(style.width) + parseFloat(style.borderLeftWidth) / 2
+              const top = Math.max(a.rect.top, b.rect.top),
+                bottom = Math.min(a.rect.bottom, b.rect.bottom)
+              const rows = [0.07, 0.34, 0.61, 0.88].map((f) => top + f * (bottom - top))
+              if (tool && Math.min(store.bottom, tool.bottom) > Math.max(store.top, tool.top)) {
+                rows.push((Math.max(store.top, tool.top) + Math.min(store.bottom, tool.bottom)) / 2)
+              }
+              const edges = rows.map((y) => {
+                const x = stripeAtTop + (y - band.top) * shear
+                const [left, right] = interval(a, y),
+                  [start, end] = interval(b, y)
+                const expected = Math.min(a.rect.right, Math.max(a.rect.left, x))
+                const overlap = Math.max(0, Math.min(right, end) - Math.max(left, start))
+                return {
+                  y,
+                  x,
+                  oldRight: right,
+                  newLeft: start,
+                  error: Math.max(Math.abs(right - expected), Math.abs(start - expected)),
+                  overlap,
+                }
+              })
+              samples.push({ portion, stripeAtTop, shear, edges })
+            }
+            const style = getComputedStyle(stripe)
+            resolve({
+              from: fromMode,
+              to: 2,
+              duration,
+              viewport: [innerWidth, innerHeight],
+              oldInert: old.inert,
+              oldVisible: old.getClientRects().length > 0,
+              ariaHidden: old.getAttribute('aria-hidden'),
+              focusBlocked: !!control && document.activeElement !== control,
+              yellow: style.borderLeftColor,
+              stripeWidth: parseFloat(style.borderLeftWidth),
+              samples,
+            })
+          } catch (error) {
+            reject(error)
+          } finally {
+            clock.currentTime = original
+            clock.play()
+          }
+        })
+        observer.observe(shell, { subtree: true, attributes: true, childList: true })
+        const timeout = setTimeout(() => {
+          observer.disconnect()
+          reject(Error('City handoff did not start'))
+        }, 6000)
+      }),
+    }),
+    from,
+  )
+  try {
+    await page.keyboard.press('2')
+    const result = await probe.evaluate((handle) => handle.result)
+    assert.ok(result.oldInert && result.oldVisible && result.ariaHidden === 'true' && result.focusBlocked)
+    assert.equal(result.duration, 180)
+    assert.equal(result.yellow, 'rgb(255, 230, 0)')
+    assert.equal(result.stripeWidth, 3)
+    let interior = 0
+    result.samples.forEach((sample, i) => {
+      assert.ok(Math.abs(sample.shear - Math.tan((-23 * Math.PI) / 180)) < 0.0001)
+      if (i)
+        assert.ok(sample.stripeAtTop < result.samples[i - 1].stripeAtTop, 'City cut must move right to left')
+      for (const edge of sample.edges) {
+        assert.ok(
+          edge.error < 1 && edge.overlap < 1,
+          'HUDs must meet at the yellow border: ' + JSON.stringify(edge),
+        )
+        if (edge.x > 1 && edge.x < result.viewport[0] - 1) interior++
+      }
+    })
+    assert.ok(interior >= 5, 'Sample multiple interior locations on the moving diagonal')
+    return result
+  } finally {
+    await probe.dispose()
+  }
+}
+
 async function industryCut(page, holdFrame = false) {
   // Seek the actual, shared CSS animation. Reading resolved clip insets synchronously avoids
   // losing all intermediate frames on a low-FPS adapter.
@@ -238,7 +382,9 @@ export async function captureIndustryCut(browser, url, outputPath) {
   try {
     await page.goto(url, { waitUntil: 'networkidle' })
     await page.locator('#terminal[aria-busy="false"]').waitFor()
-    await page.keyboard.press('2')
+    await page.keyboard.press('3')
+    await page.locator('.plant-dock').waitFor({ state: 'visible' })
+    const reverse = await verifyCityCut(page, 3)
     await page.locator('.mh-city button[data-district="yard"]').waitFor({ state: 'visible' })
     await page.locator('.mode-sweep').waitFor({ state: 'detached' })
     const result = await industryCut(page, true)
@@ -250,7 +396,7 @@ export async function captureIndustryCut(browser, url, outputPath) {
       'Staged handoff should remain visible',
     )
     await page.screenshot({ path: outputPath, timeout: 60_000 })
-    return { cut: result, caption: await verifyIndustryCaption(page) }
+    return { cut: result, reverse, caption: await verifyIndustryCaption(page) }
   } finally {
     await page.close()
   }
@@ -265,6 +411,10 @@ export async function verifyModeMotion(page) {
   ]) {
     await page.locator('.mode-sweep').waitFor({ state: 'detached' })
     if (from === 2) await page.locator('.mh-city button[data-district="yard"]').waitFor({ state: 'visible' })
+    if (to === 2) {
+      traces.push(await verifyCityCut(page, from))
+      continue
+    }
     if (from === 2 && to === 3) {
       traces.push(await industryCut(page))
       continue
@@ -352,19 +502,9 @@ export async function verifyModeMotion(page) {
     )
     assert.ok(trace.retainedMs >= 172, 'Old HUD removed before its 180 ms exit')
     assert.equal(trace.exit.durationMs, 180, 'The outgoing HUD uses its authored 180 ms clip')
-    assert.equal(trace.animation.name, ['', '', 'dd-city-scan', 'dd-industry-scan', 'dd-combat-scan'][to])
-    const geometry = trace.animation.frames.map((frame) => frame.transform || '').join(' ')
-    if (to === 2) assert.ok(Math.abs(trace.animation.shear) > 0.1 || /skew/i.test(geometry))
-    if (to === 3) {
-      assert.equal(trace.animation.height, '1px')
-      assert.ok(new Set(trace.animation.frames.map((f) => f.transform)).size >= 2)
-    }
-    if (to === 4) {
-      assert.ok(
-        trace.animation.pieces >= 4 && new Set(trace.animation.frames.map((f) => f.clipPath)).size >= 3,
-      )
-      assert.match(trace.animation.timing, /step/i)
-    }
+    assert.equal(trace.animation.name, 'dd-combat-scan')
+    assert.ok(trace.animation.pieces >= 4 && new Set(trace.animation.frames.map((f) => f.clipPath)).size >= 3)
+    assert.match(trace.animation.timing, /step/i)
     traces.push(trace)
   }
   const rapid = await page.evaluate(() =>

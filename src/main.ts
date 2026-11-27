@@ -23,6 +23,8 @@ const app = el('terminal'),
   nav = el('modes-nav'),
   drawer = el<HTMLDialogElement>('drawer')
 const deploy = el<HTMLButtonElement>('deploy'),
+  deployLabel = deploy.querySelector('strong')!,
+  deployTranslation = deploy.querySelector<HTMLElement>('.launch-zh')!,
   audio = el<HTMLButtonElement>('audio')
 const driveInfo = over.querySelector<HTMLElement>('.drive-info')!,
   driveSpeed = over.querySelector<HTMLElement>('.drive-speed')!,
@@ -329,7 +331,10 @@ function refresh(force = false) {
     signature = [s.mode, s.started, s.raid.active].join(':')
   if (force || signature !== viewSignature) {
     viewSignature = signature
-    if (ready) deploy.querySelector('strong')!.textContent = s.raid.active ? 'RESUME SORTIE' : 'ENTER SECTOR'
+    if (ready) {
+      deployLabel.textContent = s.raid.active ? 'RESUME SORTIE' : 'ENTER SECTOR'
+      deployTranslation.hidden = s.raid.active
+    }
     app.classList.toggle('is-driving', driving)
     nav
       .querySelectorAll('button')
@@ -596,10 +601,9 @@ async function boot() {
   world.setQuality?.(prefs.quality)
   initCanvas()
   statusAudio()
-  refresh(true)
-  deploy.querySelector('strong')!.textContent = game.state.raid.active ? 'RESUME SORTIE' : 'ENTER SECTOR'
-  deploy.disabled = false
   ready = true
+  refresh(true)
+  deploy.disabled = false
   app.setAttribute('aria-busy', 'false')
   requestAnimationFrame(frame)
 }
