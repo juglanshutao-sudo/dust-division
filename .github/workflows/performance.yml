@@ -1,0 +1,38 @@
+name: Benchmark production renderers
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['qa/acceptance']
+
+permissions:
+  contents: read
+
+jobs:
+  ubuntu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    env:
+      DUST_BENCH_URL: http://127.0.0.1:4173/
+      DUST_BENCH_DIR: renderer-benchmark
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx --no-install playwright install --with-deps chromium
+      - run: sudo apt-get install -y --no-install-recommends mesa-utils libgl1-mesa-dri libegl-mesa0 xvfb xauth
+      - name: Measure headful Chromium under X11
+        run: |
+          python3 -m http.server 4173 --bind 127.0.0.1 --directory dist > "$RUNNER_TEMP/dust-benchmark-http.log" 2>&1 &
+          for i in {1..30}; do curl --fail --silent "$DUST_BENCH_URL" -o /dev/null && break; sleep 1; done
+          xvfb-run --auto-servernum --server-args="-screen 0 1440x900x24 +extension GLX +extension RENDER" node scripts/benchmark-renderer.mjs
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dust-division-renderer-benchmark-${{ github.run_id }}-${{ github.run_attempt }}
+          path: renderer-benchmark/
+          retention-days: 14

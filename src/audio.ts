@@ -54,7 +54,8 @@ export class Soundscape {
   unlock(): void {
     if (this.disposed || typeof window === 'undefined') return
     if (!this.context) {
-      const Audio = window.AudioContext ||
+      const Audio =
+        window.AudioContext ||
         (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
       if (!Audio) return
 
@@ -180,8 +181,14 @@ export class Soundscape {
   }
 
   private voice(
-    source: OscillatorNode | AudioBufferSourceNode, at: number, duration: number,
-    level: number, attack: number, echo = false, pan = 0, filter?: AudioNode
+    source: OscillatorNode | AudioBufferSourceNode,
+    at: number,
+    duration: number,
+    level: number,
+    attack: number,
+    echo = false,
+    pan = 0,
+    filter?: AudioNode,
   ): void {
     const ac = this.context!
     const gain = ac.createGain()
@@ -210,8 +217,13 @@ export class Soundscape {
   }
 
   private running(): boolean {
-    return this.enabled && this.volume > 0 && !this.disposed &&
-      this.context?.state === 'running' && !document.hidden
+    return (
+      this.enabled &&
+      this.volume > 0 &&
+      !this.disposed &&
+      this.context?.state === 'running' &&
+      !document.hidden
+    )
   }
 
   play(name: string): void {
@@ -224,32 +236,53 @@ export class Soundscape {
         this.hoverTime = now
         this.tone({ hz: 1190, end: 1070, duration: 0.024, level: 0.018 })
         break
-      case 'click': case 'ui': case 'cancel':
+      case 'click':
+      case 'ui':
+      case 'cancel':
         this.burst(2400, 780, 0.09, 0.032)
         this.tone({ hz: 410, end: 268, duration: 0.055, level: 0.055, wave: 'triangle' })
         break
-      case 'mode': case 'switch':
+      case 'mode':
+      case 'switch':
         this.burst(450, 3100, 0.14, 0.14, 0, -0.4)
-        this.tone({ hz: 246.94, end: 369.99, duration: 0.16, level: 0.068, wave: 'triangle', pan: 0.3, echo: true })
+        this.tone({
+          hz: 246.94,
+          end: 369.99,
+          duration: 0.16,
+          level: 0.068,
+          wave: 'triangle',
+          pan: 0.3,
+          echo: true,
+        })
         break
-      case 'start': case 'raid':
+      case 'start':
+      case 'raid':
         this.tone({ hz: 73.42, end: 55, duration: 1.0, level: 0.19, attack: 0.04 })
         this.tone({ hz: 220, end: 164.81, duration: 0.65, level: 0.055, wave: 'triangle', echo: true })
         this.burst(2100, 220, 0.24, 0.44)
         break
-      case 'build': case 'power':
+      case 'build':
+      case 'power':
         this.tone({ hz: 131, end: 67, duration: 0.23, level: 0.19, wave: 'triangle' })
         this.burst(510, 190, 0.27, 0.19)
         this.tone({ hz: 659.25, duration: 0.12, delay: 0.14, level: 0.072, echo: true })
         break
-      case 'salvage': case 'confirm': case 'upgrade':
+      case 'salvage':
+      case 'confirm':
+      case 'upgrade':
         this.burst(2100, 990, 0.08, 0.052)
         this.tone({ hz: 493.88, duration: 0.18, level: 0.073, wave: 'triangle' })
         this.tone({ hz: 739.99, duration: 0.3, delay: 0.075, level: 0.05, echo: true })
         break
       case 'attack':
         this.burst([480, 1100, 290][this.operator], 3100, 0.33, 0.14, 0, -0.16)
-        this.tone({ hz: [300, 493.88, 130.81][this.operator], end: 67, duration: 0.11, level: 0.14, wave: 'triangle' })
+        this.tone({
+          hz: [300, 493.88, 130.81][this.operator],
+          end: 67,
+          duration: 0.11,
+          level: 0.14,
+          wave: 'triangle',
+        })
         break
       case 'hit':
         this.burst(3100, 240, 0.45, 0.14, 0, pan)
@@ -259,7 +292,8 @@ export class Soundscape {
         this.burst(1100, 90, 0.52, 0.3)
         this.tone({ hz: 85, end: 31, duration: 0.4, level: 0.28, wave: 'triangle' })
         break
-      case 'parry': case 'resonance':
+      case 'parry':
+      case 'resonance':
         this.burst(5200, 550, 0.43, 0.24)
         this.tone({ hz: 183.5, end: 44, duration: 0.27, level: 0.27 })
         this.tone({ hz: 1318, end: 1108, duration: 0.5, level: 0.15, pan: -0.25, echo: true })
@@ -269,9 +303,25 @@ export class Soundscape {
         // Rising sweep, descending hammer and a stuttering charge have distinct tells.
         const hammer = this.incomingMove === 'slam'
         const charge = this.incomingMove === 'lunge'
-        this.tone({ hz: hammer ? 185 : 123.47, end: hammer ? 68 : 196, duration: 0.33, level: 0.15, wave: 'triangle', attack: 0.065, pan, echo: true })
-        this.tone({ hz: charge ? 369.99 : 246.94, end: hammer ? 123.47 : 293.66, duration: charge ? 0.10 : 0.22, level: 0.082, delay: 0.09, pan })
-        if (charge) this.tone({ hz: 415.3, duration: 0.10, level: 0.09, delay: 0.22, pan })
+        this.tone({
+          hz: hammer ? 185 : 123.47,
+          end: hammer ? 68 : 196,
+          duration: 0.33,
+          level: 0.15,
+          wave: 'triangle',
+          attack: 0.065,
+          pan,
+          echo: true,
+        })
+        this.tone({
+          hz: charge ? 369.99 : 246.94,
+          end: hammer ? 123.47 : 293.66,
+          duration: charge ? 0.1 : 0.22,
+          level: 0.082,
+          delay: 0.09,
+          pan,
+        })
+        if (charge) this.tone({ hz: 415.3, duration: 0.1, level: 0.09, delay: 0.22, pan })
         break
       }
       case 'dodge':
@@ -293,7 +343,8 @@ export class Soundscape {
         })
         break
       }
-      case 'failure': case 'error':
+      case 'failure':
+      case 'error':
         this.tone({ hz: 154, end: 93, duration: 0.26, level: 0.12, wave: 'triangle' })
         this.burst(700, 240, 0.12, 0.11)
         break
@@ -365,7 +416,7 @@ export class Soundscape {
     this.previousSecond = second
     const extraction = Math.ceil(state.raid.extraction)
     if (state.raid.active && extraction > 0 && extraction !== this.previousExtraction) {
-      this.tone({ hz: 659.25, duration: 0.09, level: 0.10, echo: true })
+      this.tone({ hz: 659.25, duration: 0.09, level: 0.1, echo: true })
     }
     this.previousExtraction = extraction
   }
@@ -390,7 +441,16 @@ export class Soundscape {
     this.nextBeat = now + (mode === 2 ? 1.55 : 2.28)
     const notes = [220, 0, 329.63, 0, 246.94, 196, 0, 0]
     const hz = notes[step]
-    if (hz) this.tone({ hz, end: hz * 0.998, duration: 1.84, attack: 0.25, level: 0.028, pan: Math.sin(step) * 0.56, echo: true })
+    if (hz)
+      this.tone({
+        hz,
+        end: hz * 0.998,
+        duration: 1.84,
+        attack: 0.25,
+        level: 0.028,
+        pan: Math.sin(step) * 0.56,
+        echo: true,
+      })
   }
 
   dispose(): void {

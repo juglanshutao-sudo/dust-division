@@ -1,2 +1,5 @@
-import {defineConfig} from 'vite'
-export default defineConfig({base:'./',build:{chunkSizeWarningLimit:760,rollupOptions:{output:{manualChunks:{three:['three']}}}}})
+import { defineConfig } from 'vite'
+export default defineConfig({
+  base: './',
+  build: { chunkSizeWarningLimit: 760, rollupOptions: { output: { manualChunks: { three: ['three'] } } } },
+})
