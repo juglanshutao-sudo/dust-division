@@ -175,6 +175,6 @@ async function boot(){
    const {createFallback}=await import('./fallback');world=createFallback(canvas);renderType='Canvas 2D'
  }
  world.setQuality?.(prefs.quality);initCanvas();statusAudio();refresh(true)
- deploy.disabled=false;ready=true;app.setAttribute('aria-busy','false');requestAnimationFrame(frame)
+ deploy.querySelector('strong')!.textContent='ENTER SECTOR';deploy.disabled=false;ready=true;app.setAttribute('aria-busy','false');requestAnimationFrame(frame)
 }
 void boot()

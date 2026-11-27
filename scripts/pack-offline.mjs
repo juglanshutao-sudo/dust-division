@@ -110,6 +110,8 @@ for (const match of markup.matchAll(/\b(?:href|src|srcset)="([^"]+)"/g)) {
 for (const match of css.matchAll(/url\(\s*["']?([^)"']+)/g)) {
   if (!/^(?:data:|#)/.test(match[1])) throw new Error(`Unembedded stylesheet resource: ${match[1]}`)
 }
+const notices = await readFile(resolve(root, 'public/THIRD-PARTY-NOTICES.txt'), 'utf8')
+html = html.replace('</body>', () => '<script type="text/plain" id="third-party-notices">' + notices.replace(/<\/script/gi, '<\\/script') + '</script>\n</body>')
 await mkdir(dirname(destination), {recursive: true})
 await writeFile(destination, html)
 console.log(`Standalone game: ${destination} (${(Buffer.byteLength(html) / 1048576).toFixed(2)} MiB)`)
