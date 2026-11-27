@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#eee9de">
+<meta name="description" content="Drive the Ashline Expanse, power a frontier settlement and extract your squad in Dust Division, a real-time 3D expedition.">
+<title>Dust Division — The Ashline Expanse</title>
+<link rel="icon" type="image/svg+xml" href="./mark.svg">
+<link rel="preload" as="image" href="./art/ashline.webp">
+</head>
+<body>
+<div id="terminal" data-mode="1" aria-busy="true">
+<main id="viewport" aria-label="Ashline field simulation">
+<canvas id="world" aria-label="Real-time 3D game world" tabindex="0"></canvas>
+<img id="standby-rover" src="./art/rover.webp" alt="" fetchpriority="high"><div id="reticle" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+<section id="overworld" aria-label="Overworld">
+<div class="hero-copy">
+<div class="eyebrow"><i class="signal-dot"></i><span>OPEN WORLD</span><b>/</b><span>SECTOR 07</span></div>
+<h1><span>DUST<sup>®</sup></span><span>DIVISION</span></h1>
+<p class="region-name">The Ashline Expanse</p>
+<button id="deploy" class="launch" disabled><span class="launch-symbol" aria-hidden="true"></span><strong>ENTER SECTOR</strong><kbd>↵</kbd></button>
+</div>
+<div class="landmark" aria-hidden="true"><i></i><span>HELIOSTAT<br><b>ARRAY 07</b></span></div>
+<div class="drive-info" hidden><div class="eyebrow"><i class="signal-dot"></i>FIELD DRIVE</div><h2>Ashline Expanse</h2><button id="park" class="park-command">Park rover <kbd>R</kbd></button></div>
+<div class="drive-speed" hidden><strong id="kph">00</strong> <span>KM/H</span><i id="speed-meter"></i></div>
+<div class="waypoint" hidden><span>WAYPOINT</span><strong id="waypoint-name"></strong><button id="interact"><kbd>E</kbd><span>Interact</span></button></div>
+<div class="field-readings">
+<div class="reading"><span class="read-icon" data-icon="clock"></span><div><small>LOCAL TIME</small><strong><span id="local-hour">07:40</span> <em id="local-day">D01</em></strong></div></div>
+<div class="reading"><span class="read-icon" data-icon="weather"></span><div><small>ATMOSPHERE</small><strong id="atmosphere">Clear <em>/ 28°C</em></strong></div></div>
+</div>
+<aside class="sector-map" aria-label="Sector minimap"><div class="map-title"><span><i></i> SECTOR MAP</span><b>N ↑</b></div><canvas id="minimap" width="370" height="135" aria-label="Position of rover and districts"></canvas><div class="map-scale"><span>ASHLINE BASIN</span><span>100 M</span></div></aside>
+</section>
+<div id="mode-hud"></div>
+<div id="touch-controls" hidden></div>
+<div id="notice" role="status" aria-live="polite"></div>
+</main>
+<header class="topbar">
+<a class="identity" href="#overworld" title="Overworld" aria-label="Dust Division overworld"><svg class="sigil" viewBox="0 0 66 44" fill="currentColor" aria-hidden="true"><path d="M0 36 20 3h12L12 36zM18 36 38 3h9L27 36zM34 36 49 11l8 13-7 12zM0 40h53v3H0z"/></svg><span>DUST<span class="word-divider">/</span>DIVISION</span></a>
+<nav aria-label="Game modes" id="modes-nav"></nav>
+<div class="header-actions"><button id="audio" aria-label="Mute audio" title="Toggle audio [M]"><span class="audio-bars"><i></i><i></i><i></i><i></i><i></i></span><span class="audio-label">AUDIO</span></button><span class="hair"></span><button id="settings" class="icon-button" data-icon="settings" title="Settings" aria-label="Settings"></button></div>
+</header>
+<footer class="statusbar"><span class="status-online"><i class="signal-dot"></i><span id="status-word">SYSTEM ONLINE</span></span><div id="keyline"></div><div class="foot-end"><button class="guide-trigger" title="Field guide [H]" aria-label="Open field guide"><span data-icon="book"></span>FIELD GUIDE <kbd>H</kbd></button><span class="foot-hair"></span><span id="frame-data" title="Measured rendering rate">— FPS</span></div></footer>
+<dialog id="drawer" aria-labelledby="dialog-title"><div class="dialog-head"><span class="eyebrow">DD <b>/</b> FIELD SYSTEMS</span><button id="close-panel" aria-label="Close dialog" title="Close [Esc]" data-icon="close"></button></div><div id="dialog-body"></div></dialog>
+</div>
+<script type="module" src="/src/main.ts"></script>
+</body></html>

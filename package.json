@@ -1,0 +1,25 @@
+{
+  "name": "dust-division",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "test": "node scripts/verify-game.mjs",
+    "offline": "node scripts/pack-offline.mjs"
+  },
+  "dependencies": {
+    "three": "0.180.0",
+    "@fontsource/barlow-condensed": "^5.2.8",
+    "@fontsource/dm-sans": "^5.2.8",
+    "@fontsource/ibm-plex-mono": "^5.2.8",
+    "@fontsource/instrument-serif": "^5.2.8"
+  },
+  "devDependencies": {
+    "@types/three": "^0.180.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.2"
+  }
+}
