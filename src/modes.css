@@ -546,6 +546,59 @@
   --rust: #b8332a;
   --coal: #111113;
 }
+.parry-reticle {
+  position: fixed;
+  inset: 0;
+  z-index: 8;
+  pointer-events: none;
+  color: #b8332a;
+  --reticle-travel: 0px;
+  --corner-top: calc(max(6px, env(safe-area-inset-top, 0px)) + var(--reticle-travel));
+  --corner-right: calc(max(6px, env(safe-area-inset-right, 0px)) + var(--reticle-travel));
+  --corner-bottom: calc(max(6px, env(safe-area-inset-bottom, 0px)) + var(--reticle-travel));
+  --corner-left: calc(max(6px, env(safe-area-inset-left, 0px)) + var(--reticle-travel));
+}
+#reticle.parry-reticle:not([hidden]) {
+  display: block;
+}
+#terminal:has(#drawer[open]) > .parry-reticle {
+  display: none !important;
+}
+.parry-reticle[data-beat='bone'] {
+  color: #ece8df;
+}
+.parry-reticle i {
+  position: absolute;
+  width: clamp(13px, 1.85vw, 25px);
+  height: clamp(13px, 1.85vw, 25px);
+  border: 0 solid currentColor;
+}
+.parry-reticle i:nth-child(1) {
+  top: var(--corner-top);
+  left: var(--corner-left);
+  border-width: 3px 0 0 3px;
+}
+.parry-reticle i:nth-child(2) {
+  top: var(--corner-top);
+  right: var(--corner-right);
+  border-width: 3px 3px 0 0;
+}
+.parry-reticle i:nth-child(3) {
+  bottom: var(--corner-bottom);
+  left: var(--corner-left);
+  border-width: 0 0 3px 3px;
+}
+.parry-reticle i:nth-child(4) {
+  bottom: var(--corner-bottom);
+  right: var(--corner-right);
+  border-width: 0 3px 3px 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .parry-reticle {
+    --reticle-travel: 0px !important;
+    color: #ece8df;
+  }
+}
 .battle-ident {
   display: flex;
   align-items: center;
@@ -744,6 +797,46 @@
   padding: 7px;
   border-right: 1px solid #706760;
   font: 500 10px/1 var(--mh-mono);
+}
+.combat-act {
+  position: relative;
+  overflow: hidden;
+}
+.combat-glyph {
+  display: grid;
+  place-items: center;
+}
+.combat-glyph > * {
+  grid-area: 1 / 1;
+}
+.combat-glyph small {
+  font: 500 10px/1 var(--mh-mono);
+  font-variant-numeric: tabular-nums;
+}
+.combat-glyph:has(small:not(:empty)) .mh-symbol {
+  visibility: hidden;
+}
+.cooldown-meter {
+  position: absolute;
+  height: 2px;
+  inset: auto 0 0;
+  background: #b8332a;
+  transform: scaleX(var(--action-meter, 0));
+  transform-origin: left;
+}
+.mode-huds .combat-act[data-state='cooldown']:disabled,
+.mode-huds .combat-act[data-indicator='confirm']:disabled {
+  opacity: 0.86;
+}
+.combat-act[data-indicator='window'] .cooldown-meter,
+.combat-act[data-indicator='confirm'] .cooldown-meter {
+  background: #ece8df;
+}
+.combat-act[data-indicator='confirm'] .combat-glyph {
+  color: #ece8df;
+}
+.combat-act[data-state='paused'] .cooldown-meter {
+  background: #8b847d;
 }
 .mode-huds .combat-act:last-child {
   border: 0;

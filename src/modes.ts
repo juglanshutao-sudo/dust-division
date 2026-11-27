@@ -1,5 +1,6 @@
 import { BUILDINGS, CREW, EXTRACTION, Game, LOCATIONS, gridToWorld } from './sim'
 import './modes.css'
+import './mode-transition.css'
 
 type Project = (x: number, z: number, height?: number) => { x: number; y: number; visible: boolean }
 const kinds = ['generator', 'relay', 'extractor', 'refinery', 'belt'] as const
@@ -98,7 +99,7 @@ function battle() {
         <small data-ui="tile-help"></small>
       </div>
     </div>
-    <div class="squad-caption"><span class="mh-cap" data-ui="squad-label"></span><span class="bond-label" data-ui="bond"></span></div>
+    <div class="squad-caption"><span class="mh-cap" data-ui="squad-label"></span><span class="bond-label" data-ui="bond"></span><span class="bond-label live-links" data-ui="live-links" hidden></span></div>
     <div class="squad-slots" role="group" aria-label="Squad formation">${[0, 1, 2].map((i) => `<button class="squad-slot" data-slot="${i}"><span data-ui="slot-icon-${i}" style="display:contents"></span><strong data-ui="name-${i}"></strong><small data-ui="element-${i}"></small></button>`).join('')}</div>
     <div class="squad-health"><span class="mh-cap" data-ui="squad-information"></span><progress data-ui="party-bar" max="100" value="100" aria-label="Squad integrity"></progress></div></div>
     <div class="mh-br battle-actions"><button class="battle-deploy" data-command="raid">Launch incursion ${icon('uplink')}</button>
@@ -110,25 +111,50 @@ function battle() {
     ]
       .map(
         ([k, n, key]) =>
-          `<button class="combat-act" data-command="${k}" title="${n} · ${key}" aria-label="${n}">${icon(k)}${n}</button>`,
+          `<button class="combat-act" data-command="${k}" data-key="${key}" data-state="locked" data-remaining="0.000" title="${n} · ${key}" aria-label="${n}" disabled><span class="combat-glyph">${icon(k)}<small data-ui="timer-${k}" aria-hidden="true"></small></span><span>${n}</span><i class="cooldown-meter" aria-hidden="true"></i></button>`,
       )
       .join('')}</div>
     <button class="battle-withdraw" data-command="exfil">Extraction field</button></div>
   </section>`
 }
 
-export function createModes(container: HTMLElement, game: Game, project: Project) {
+export function createModes(
+  container: HTMLElement,
+  game: Game,
+  project: Project,
+  options: { overworld?: HTMLElement; shell?: HTMLElement; motionEnabled?: () => boolean } = {},
+) {
   const root = document.createElement('div')
   root.className = 'mode-huds'
   container.append(root)
+  const terminal = container.closest<HTMLElement>('#terminal') ?? container
+  const parryEdge = terminal.querySelector<HTMLElement>('#reticle') ?? document.createElement('div')
+  parryEdge.classList.add('parry-reticle')
+  parryEdge.dataset.ui = 'parry-edge'
+  parryEdge.inert = true
+  parryEdge.setAttribute('aria-hidden', 'true')
+  parryEdge.hidden = true
+  if (!parryEdge.childElementCount) parryEdge.innerHTML = '<i></i><i></i><i></i><i></i>'
+  terminal.append(parryEdge)
   const cache = new Map<string, Element>()
   const anchors = new Map<HTMLElement, string>()
-  let page = ''
+  const { overworld, shell } = options
+  const motionPreference = container.ownerDocument.defaultView?.matchMedia?.(
+    '(prefers-reduced-motion: reduce)',
+  )
+  let page: string | undefined
+  let outgoing: HTMLElement | null = null
+  let previousHeroStyle = ''
+  let entering: HTMLElement | null = null
+  let sweep: HTMLElement | null = null
+  let exitTimer: ReturnType<typeof setTimeout> | undefined
+  let sweepTimer: ReturnType<typeof setTimeout> | undefined
   let selectedCell = -1
   let hoveredCell = -1
   let gridPaths: SVGPathElement[] = []
   let lastSignalFrame = -1
   let lastSignature = ''
+  let timeAtCoreExposure: number | undefined
 
   function element<T extends Element = HTMLElement>(selector: string): T {
     let found = cache.get(selector)
@@ -167,14 +193,78 @@ export function createModes(container: HTMLElement, game: Game, project: Project
       el.style.transform = value
     }
   }
+  function releasePrevious() {
+    clearTimeout(exitTimer)
+    exitTimer = undefined
+    if (!outgoing) return
+    if (outgoing === overworld) {
+      overworld.hidden = true
+      overworld.style.cssText = previousHeroStyle
+      overworld.classList.remove('hud-leaving')
+      overworld.removeAttribute('data-from')
+      overworld.removeAttribute('aria-hidden')
+      overworld.inert = false
+    } else outgoing.remove()
+    outgoing = null
+  }
+  function endTransition() {
+    releasePrevious()
+    clearTimeout(sweepTimer)
+    sweepTimer = undefined
+    entering?.classList.remove('hud-entering')
+    entering = null
+    sweep?.remove()
+    sweep = null
+  }
+  function reduceMotion() {
+    if (motionPreference?.matches) endTransition()
+  }
   function mount(next: string) {
+    endTransition()
+    const previous = page === '' ? overworld : (root.firstElementChild as HTMLElement | null)
+    const animate = page !== undefined && !motionPreference?.matches && (options.motionEnabled?.() ?? true)
+    const focused = document.activeElement
+    if (
+      (previous?.contains(focused) || (next === 'city' && focused?.closest('#modes-nav'))) &&
+      !document.querySelector('dialog[open]')
+    ) {
+      document.getElementById('world')?.focus({ preventScroll: true })
+    }
+    if (animate && previous) {
+      // Capture once, before the destination chrome changes mobile insets or palette.
+      const sourceStyle = container.ownerDocument.defaultView?.getComputedStyle(
+        previous === overworld ? previous : root,
+      )
+      const sourceTokens = ['--hud-top', '--hud-bottom', '--ink', '--accent', '--line', '--paper'].map(
+        (name) => [name, sourceStyle?.getPropertyValue(name)] as const,
+      )
+      if (previous === overworld) {
+        previousHeroStyle = overworld.style.cssText
+        outgoing = overworld
+      } else {
+        // Move the actual visual, including projected labels, away from the delegated control listeners.
+        outgoing = document.createElement('div')
+        outgoing.className = 'mode-huds'
+        outgoing.append(previous)
+        container.append(outgoing)
+      }
+      for (const [name, value] of sourceTokens) if (value) outgoing.style.setProperty(name, value)
+      outgoing.classList.add('hud-leaving')
+      outgoing.dataset.from = page === '' ? '1' : page === 'city' ? '2' : page === 'battle' ? '4' : '3'
+      outgoing.inert = true
+      outgoing.setAttribute('aria-hidden', 'true')
+      exitTimer = setTimeout(releasePrevious, 180)
+    }
+    if (shell) shell.dataset.mode = String(game.state.mode)
+    if (overworld) overworld.hidden = next !== '' && outgoing !== overworld
     page = next
     cache.clear()
     anchors.clear()
     lastSignalFrame = -1
     lastSignature = ''
     root.hidden = !next
-    root.innerHTML =
+    const template = document.createElement('template')
+    template.innerHTML =
       next === 'city'
         ? city()
         : next === 'plant'
@@ -184,8 +274,28 @@ export function createModes(container: HTMLElement, game: Game, project: Project
             : next === 'battle'
               ? battle()
               : ''
+    root.replaceChildren(template.content)
     gridPaths = Array.from(root.querySelectorAll<SVGPathElement>('.gridpad'))
-    root.firstElementChild?.classList.add('mh-page-enter')
+    if (animate) {
+      entering = next === '' ? (overworld ?? null) : (root.firstElementChild as HTMLElement | null)
+      entering?.classList.add('hud-entering')
+      root.firstElementChild?.classList.add('mh-page-enter')
+      sweep = document.createElement('div')
+      sweep.className = 'mode-sweep'
+      sweep.dataset.to = String(game.state.mode)
+      sweep.setAttribute('aria-hidden', 'true')
+      sweep.inert = true
+      const mark = document.createElement('i')
+      mark.setAttribute('data-wipe', '')
+      if (game.state.mode === 4) {
+        // A few crisp screen-space slices are enough for the encounter's pixel cut.
+        for (let i = 0; i < 7; i++) mark.append(document.createElement('b'))
+      }
+      sweep.append(mark)
+      const sweepHost = shell ?? container
+      sweepHost.append(sweep)
+      sweepTimer = setTimeout(endTransition, 430)
+    }
     if (next === 'raid') {
       const pins = field('loot-pins')
       pins.innerHTML =
@@ -386,6 +496,17 @@ export function createModes(container: HTMLElement, game: Game, project: Project
     write('boss-pct', Math.ceil(ratio * 100) + '%')
     write('phase', 'P' + (live ? b.phase : 1) + ' / 3')
     const hot = live && b.stage === 'windup' && b.stageTime <= 0.26
+    const paused = Boolean((document.getElementById('drawer') as HTMLDialogElement | null)?.open)
+    const edge = parryEdge
+    edge.hidden = !hot || paused
+    attr(edge, 'data-remaining', (live && b.stage === 'windup' ? b.stageTime : 0).toFixed(3))
+    if (!edge.hidden) {
+      const reduce = motionPreference?.matches || options.motionEnabled?.() === false
+      const step = reduce ? 7 : Math.min(7, Math.max(0, Math.floor((0.26 - b.stageTime) * 30)))
+      attr(edge, 'data-step', String(step))
+      attr(edge, 'data-beat', step < 2 || step > 5 ? 'bone' : 'rust')
+      edge.style.setProperty('--reticle-travel', Math.round(((7 - step) * 4) / 7) + 'px')
+    }
     attr(field('scope'), 'data-open', String(hot || b.stage === 'broken'))
     const stage = live ? b.stage : 'idle'
     write(
@@ -461,6 +582,13 @@ export function createModes(container: HTMLElement, game: Game, project: Project
     }
     write('squad-label', live ? 'Squad channel' : 'Lead operator')
     write('bond', p.bond)
+    field('bond').hidden = live
+    const links = field('live-links')
+    links.hidden = !live
+    if (live) {
+      write('live-links', p.bond + ' / ' + p.linkStyle)
+      attr(links, 'title', 'Bond · ' + p.bond + ' · Formation · ' + p.linkStyle)
+    }
     const bonds: Record<string, string> = {
       Bulwark: 'Extended parry',
       Induction: 'Arc resonance',
@@ -489,15 +617,74 @@ export function createModes(container: HTMLElement, game: Game, project: Project
     element('[data-command="raid"]').hidden = live
     field('combat-acts').hidden = !live
     element('[data-command="exfil"]').hidden = !live
-    if (live) {
-      element<HTMLButtonElement>('[data-command="attack"]').disabled =
-        p.attackCooldown > 0 || b.stage === 'dead'
-      element<HTMLButtonElement>('[data-command="parry"]').disabled =
-        p.parryCooldown > 0 || b.stage === 'dead'
-      element('[data-command="parry"]').classList.toggle('window', hot)
-      element<HTMLButtonElement>('[data-command="dodge"]').disabled = p.dodgeCooldown > 0
-      element<HTMLButtonElement>('[data-command="finish"]').disabled =
-        b.stage !== 'broken' || Math.hypot(b.x - p.x, b.z - p.z) > 8
+    const coreOpen = live && b.stage === 'broken'
+    const inRange = Math.hypot(b.x - p.x, b.z - p.z) <= 8
+    const secured = b.stage === 'dead'
+    const finishButton = element<HTMLButtonElement>('.combat-act[data-command="finish"]')
+    attr(finishButton, 'data-window', (coreOpen ? s.raid.timeLeft : 0).toFixed(3))
+    attr(finishButton, 'data-confirm', (secured ? s.fx.finish : 0).toFixed(3))
+    const actions = [
+      ['attack', p.attackCooldown, CREW[p.active].delay, secured ? 'Core secured' : ''],
+      ['parry', p.parryCooldown, 0.81, secured ? 'Core secured' : ''],
+      ['dodge', p.dodgeCooldown, 1.22, ''],
+      [
+        'finish',
+        0,
+        1,
+        secured ? 'Core secured' : !coreOpen ? 'Core shielded' : !inRange ? 'Approach within 8 m' : '',
+      ],
+    ] as const
+    for (const [command, remaining, duration, lock] of actions) {
+      const btn = element<HTMLButtonElement>('.combat-act[data-command="' + command + '"]')
+      const hitstopLock = command === 'attack' && s.fx.hitstop > 0
+      const state = paused
+        ? 'paused'
+        : !live || lock
+          ? 'locked'
+          : remaining > 0
+            ? 'cooldown'
+            : hitstopLock
+              ? 'locked'
+              : 'ready'
+      const isFinish = command === 'finish'
+      const confirmation = isFinish && secured && s.fx.finish > 0
+      const window = isFinish && coreOpen
+      const showCooldown = state === 'cooldown' || (paused && live && remaining > 0 && !lock)
+      const indicator = confirmation ? 'confirm' : window ? 'window' : showCooldown ? 'cooldown' : state
+      const fraction = confirmation
+        ? Math.max(s.fx.finish, Math.min(1, s.fx.hitstop / 0.19))
+        : window
+          ? s.raid.timeLeft / Math.max(0.001, timeAtCoreExposure ?? s.raid.timeLeft)
+          : showCooldown
+            ? remaining / duration
+            : 0
+      btn.disabled = state !== 'ready'
+      attr(btn, 'data-state', state)
+      attr(btn, 'data-indicator', indicator)
+      attr(btn, 'data-remaining', remaining.toFixed(3))
+      const fill = Math.max(0, Math.min(1, fraction)).toFixed(3)
+      if (btn.style.getPropertyValue('--action-meter') !== fill) btn.style.setProperty('--action-meter', fill)
+      btn.classList.toggle('window', command === 'parry' && hot && state === 'ready')
+      const seconds = remaining > 0 ? (Math.ceil(remaining * 10) / 10).toFixed(1) + ' s' : ''
+      const status = paused
+        ? 'Paused'
+        : !live
+          ? 'Encounter preparation'
+          : lock || seconds || (hitstopLock ? 'Impact hold' : 'Ready')
+      const name = command[0].toUpperCase() + command.slice(1)
+      const hint = window ? ' · Core exposed until sortie ends · ' + Math.ceil(s.raid.timeLeft) + ' s' : ''
+      attr(btn, 'title', name + ' · ' + btn.dataset.key + ' · ' + status + hint)
+      attr(btn, 'aria-description', status + hint)
+      write(
+        'timer-' + command,
+        confirmation
+          ? 'OK'
+          : window
+            ? Math.ceil(s.raid.timeLeft) + 's'
+            : showCooldown
+              ? seconds.replace(' ', '')
+              : '',
+      )
     }
   }
 
@@ -557,9 +744,16 @@ export function createModes(container: HTMLElement, game: Game, project: Project
   }
   function update() {
     const { mode, raid: r } = game.state
+    if (r.active && game.state.boss.stage === 'broken') timeAtCoreExposure ??= r.timeLeft
+    else timeAtCoreExposure = undefined
     const target =
       mode === 1 ? '' : mode === 2 ? 'city' : mode === 3 ? (r.active ? 'raid' : 'plant') : 'battle'
-    if (page !== target || (!target && !root.hidden)) mount(target)
+    if (target !== 'battle' && !parryEdge.hidden) {
+      parryEdge.hidden = true
+      parryEdge.dataset.remaining = '0.000'
+    }
+    if (page !== target) mount(target)
+    else if (sweep && options.motionEnabled?.() === false) endTransition()
     if (!page) return
     if (page === 'battle') {
       updateBattle()
@@ -570,6 +764,7 @@ export function createModes(container: HTMLElement, game: Game, project: Project
     if (page === 'plant') updatePlant(box)
     if (page === 'raid') updateRaid(box)
   }
+  motionPreference?.addEventListener?.('change', reduceMotion)
   root.addEventListener('click', onclick)
   root.addEventListener('keydown', onKey)
   root.addEventListener('pointerover', onPointer)
@@ -577,9 +772,12 @@ export function createModes(container: HTMLElement, game: Game, project: Project
   return {
     update,
     destroy() {
+      endTransition()
+      motionPreference?.removeEventListener?.('change', reduceMotion)
       root.removeEventListener('click', onclick)
       root.removeEventListener('keydown', onKey)
       root.removeEventListener('pointerover', onPointer)
+      parryEdge.remove()
       root.remove()
     },
   }

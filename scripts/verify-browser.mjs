@@ -6,6 +6,12 @@ import { tmpdir } from 'node:os'
 import { extname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import {
+  verifyOverworldChrome,
+  verifyModeMotion,
+  watchCombatHUD,
+  verifySecuredCoreActions,
+} from './verify-motion.mjs'
 
 const dist = fileURLToPath(new URL('../dist/', import.meta.url))
 const output = process.env.DUST_QA_DIR
@@ -361,6 +367,14 @@ try {
     await page.evaluate(() => document.fonts.ready)
     await capture('01-hero')
   })
+  await check(
+    'Kept the scene visible beneath readable overworld chrome and distinct HUD transitions',
+    async () => {
+      report.overworldChrome = await verifyOverworldChrome(page)
+      report.modeMotion = await verifyModeMotion(page)
+      console.log('MOTION', JSON.stringify(report.modeMotion))
+    },
+  )
   await check('Drove and parked from the overworld', async () => {
     await button(/ENTER SECTOR/i).click()
     await page.keyboard.down('w')
@@ -413,89 +427,100 @@ try {
   await check('Parried a telegraphed strike, broke all armour phases and executed the Warden', async () => {
     // The software renderer may show only a single frame of the parry cue. React to the
     // visible HUD on that frame, through the ordinary Parry button handler.
-    const fight = await page.evaluate(
-      () =>
-        new Promise((resolve, reject) => {
-          const start = performance.now(),
-            phases = new Set(),
-            moves = new Set()
-          let parried = false,
-            parryAttempts = 0,
-            strikes = 0,
-            swaps = 0
-          const result = () => ({
-            phases: [...phases],
-            moves: [...moves],
-            parried,
-            parryAttempts,
-            strikes,
-            swaps,
-          })
-          const text = (key) => document.querySelector('[data-ui="' + key + '"]')?.textContent.trim()
-          const command = (name) =>
-            document.querySelector('.combat-strip button[data-command="' + name + '"]')
-          const deadline = setTimeout(
-            () => reject(new Error('Combat timed out: ' + JSON.stringify(result()))),
-            105_000,
-          )
-          const end = (fn, data) => {
-            clearTimeout(deadline)
-            fn(data)
-          }
-          function play() {
-            const attack = command('attack'),
-              guard = command('parry'),
-              finish = command('finish')
-            if (!attack || !guard || !finish) {
-              end(reject, new Error('Encounter ended before execution: ' + JSON.stringify(result())))
-              return
+    const [fight, hud] = await Promise.all([
+      page.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const start = performance.now(),
+              phases = new Set(),
+              moves = new Set()
+            let parried = false,
+              parryAttempts = 0,
+              strikes = 0,
+              swaps = 0
+            const result = () => ({
+              phases: [...phases],
+              moves: [...moves],
+              parried,
+              parryAttempts,
+              strikes,
+              swaps,
+            })
+            const text = (key) => document.querySelector('[data-ui="' + key + '"]')?.textContent.trim()
+            const command = (name) =>
+              document.querySelector('.combat-strip button[data-command="' + name + '"]')
+            const deadline = setTimeout(
+              () => reject(new Error('Combat timed out: ' + JSON.stringify(result()))),
+              105_000,
+            )
+            const end = (fn, data) => {
+              clearTimeout(deadline)
+              fn(data)
             }
-            const phase = text('phase'),
-              move = text('boss-move')
-            if (phase) phases.add(phase.split(' / ')[0])
-            if (move) moves.add(move)
-            if (!parried) {
-              if (
-                document.querySelector('#notice')?.textContent.includes('Perfect parry') &&
-                move === 'Staggered'
-              )
-                parried = true
-              else if (!guard.disabled && text('boss-window') === 'PARRY') {
-                guard.click()
-                parryAttempts++
-              }
-            }
-            if (parried) {
-              if (!finish.disabled && move === 'Core exposed') {
-                end(resolve, result())
+            function play() {
+              const attack = command('attack'),
+                guard = command('parry'),
+                finish = command('finish')
+              if (!attack || !guard || !finish) {
+                end(reject, new Error('Encounter ended before execution: ' + JSON.stringify(result())))
                 return
               }
-              if (!attack.disabled) {
-                const before = text('boss-pct')
-                attack.click()
-                if (before !== text('boss-pct')) strikes++
-              } else {
-                const slots = Array.from(document.querySelectorAll('button[data-slot]'))
-                const active = slots.findIndex((slot) => slot.getAttribute('aria-pressed') === 'true')
-                const next = slots[(active + 1) % slots.length]
-                if (next && !next.disabled) {
-                  next.click()
-                  swaps++
+              const phase = text('phase'),
+                move = text('boss-move')
+              if (phase) phases.add(phase.split(' / ')[0])
+              if (move) moves.add(move)
+              if (!parried) {
+                if (
+                  document.querySelector('#notice')?.textContent.includes('Perfect parry') &&
+                  move === 'Staggered'
+                )
+                  parried = true
+                else if (!guard.disabled && text('boss-window') === 'PARRY') {
+                  guard.click()
+                  parryAttempts++
                 }
               }
+              if (parried) {
+                if (!finish.disabled && move === 'Core exposed') {
+                  end(resolve, result())
+                  return
+                }
+                if (!attack.disabled) {
+                  const before = text('boss-pct')
+                  attack.click()
+                  if (before !== text('boss-pct')) strikes++
+                } else {
+                  const slots = Array.from(document.querySelectorAll('button[data-slot]'))
+                  const active = slots.findIndex((slot) => slot.getAttribute('aria-pressed') === 'true')
+                  const next = slots[(active + 1) % slots.length]
+                  if (next && !next.disabled) {
+                    next.click()
+                    swaps++
+                  }
+                }
+              }
+              if (performance.now() - start < 105_000) requestAnimationFrame(play)
             }
-            if (performance.now() - start < 105_000) requestAnimationFrame(play)
-          }
-          requestAnimationFrame(play)
-        }),
+            requestAnimationFrame(play)
+          }),
+      ),
+      watchCombatHUD(page),
+    ])
+    report.combatHud = hud
+    console.log('COMBAT HUD', JSON.stringify(hud))
+    assert.deepEqual(hud.violations, [])
+    assert.ok(hud.hot > 0 && hud.cold > 0 && hud.bonds.includes('Induction / Line'))
+    assert.ok(
+      hud.cooldowns.parry?.length >= 2 && hud.cooldowns.attack?.length >= 1,
+      'Cooldown bars must track live timers',
     )
     report.combat = fight
     console.log('COMBAT', JSON.stringify(fight))
     assert.deepEqual(fight.phases, ['P1', 'P2', 'P3'])
     assert.ok(fight.parried && fight.parryAttempts && fight.strikes > 1 && fight.swaps > 0)
     await capture('06-combat')
-    await page.keyboard.press('f')
-    await waitUI('[data-ui="boss-move"]', 'equals', 'Core secured')
+    report.combatHud.securedCore = await verifySecuredCoreActions(page)
+    console.log('SECURED CORE HUD', JSON.stringify(report.combatHud.securedCore))
   })
   await check('Followed the landing-zone bearing and banked the Warden core', async () => {
     await page.keyboard.press('x')

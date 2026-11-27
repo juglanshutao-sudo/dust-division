@@ -1,0 +1,196 @@
+/* Both HUDs use the same cut line while the camera continues through the live scene. */
+.hud-leaving {
+  z-index: 2;
+  animation: dd-hud-exit 180ms cubic-bezier(0.32, 0.12, 0.44, 1) both;
+}
+.hud-leaving,
+.hud-leaving * {
+  pointer-events: none !important;
+}
+.hud-leaving[data-from='1'] {
+  --ink: #20211d;
+  --accent: #ff7036;
+  color: var(--ink);
+}
+.hud-entering {
+  animation: dd-hud-enter 180ms cubic-bezier(0.32, 0.12, 0.44, 1) both;
+}
+@keyframes dd-hud-exit {
+  from {
+    clip-path: inset(0 0 0 0);
+  }
+  to {
+    clip-path: inset(0 100% 0 0);
+  }
+}
+@keyframes dd-hud-enter {
+  from {
+    clip-path: inset(0 0 0 100%);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+.mode-sweep {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  overflow: hidden;
+  pointer-events: none;
+  contain: strict;
+}
+.mode-sweep [data-wipe] {
+  position: absolute;
+  display: block;
+  pointer-events: none;
+}
+
+/* The index clears to an individual registration line. */
+.mode-sweep[data-to='1'] [data-wipe] {
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: #ece8df;
+  animation: dd-index-scan 270ms cubic-bezier(0.32, 0.12, 0.44, 1) both;
+}
+@keyframes dd-index-scan {
+  from {
+    transform: translateX(100vw);
+  }
+  to {
+    transform: translateX(-2px);
+  }
+}
+
+/* One oblique atlas panel and its two registration edges. */
+.mode-sweep[data-to='2'] [data-wipe] {
+  left: 0;
+  top: -20%;
+  bottom: -20%;
+  width: clamp(38px, 6vw, 105px);
+  background: rgb(244 239 230 / 42%);
+  border-left: 3px solid #ffe600;
+  border-right: 1px solid #0a2463;
+  animation: dd-city-scan 370ms cubic-bezier(0.3, 0.13, 0.47, 0.99) both;
+}
+@keyframes dd-city-scan {
+  from {
+    transform: translateX(calc(100vw + 42vh)) skewX(-23deg);
+  }
+  to {
+    transform: translateX(calc(-110px - 42vh)) skewX(-23deg);
+  }
+}
+
+/* A safety-orange horizontal scanline and separated edge ticks. */
+.mode-sweep[data-to='3'] [data-wipe] {
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 1px;
+  background: #ff4d00;
+  animation: dd-industry-scan 340ms cubic-bezier(0.23, 0.6, 0.58, 1) both;
+}
+.mode-sweep[data-to='3'] [data-wipe]::before,
+.mode-sweep[data-to='3'] [data-wipe]::after {
+  content: '';
+  position: absolute;
+  top: 5px;
+  height: 1px;
+  width: clamp(24px, 6vw, 98px);
+  background: #d6d7d2;
+}
+.mode-sweep[data-to='3'] [data-wipe]::before {
+  left: 0;
+}
+.mode-sweep[data-to='3'] [data-wipe]::after {
+  right: 0;
+}
+@keyframes dd-industry-scan {
+  from {
+    transform: translateY(-8px);
+  }
+  to {
+    transform: translateY(calc(100vh + 8px));
+  }
+}
+
+/* A snapped pattern of one-pixel slices. There is no additional render target. */
+.mode-sweep[data-to='4'] [data-wipe] {
+  inset: 0;
+  animation: dd-combat-scan 270ms steps(1, end) both;
+}
+.mode-sweep[data-to='4'] b {
+  height: 1px;
+  position: absolute;
+  left: 0;
+  width: 100%;
+  background: #ece8df;
+}
+.mode-sweep[data-to='4'] b:nth-child(1) {
+  top: 14%;
+  left: 38%;
+  width: 54%;
+}
+.mode-sweep[data-to='4'] b:nth-child(2) {
+  top: 29%;
+  width: 84%;
+  background: #b8332a;
+}
+.mode-sweep[data-to='4'] b:nth-child(3) {
+  top: calc(29% + 4px);
+  width: 35%;
+}
+.mode-sweep[data-to='4'] b:nth-child(4) {
+  top: 53%;
+  left: 24%;
+}
+.mode-sweep[data-to='4'] b:nth-child(5) {
+  top: 72%;
+  width: 48%;
+}
+.mode-sweep[data-to='4'] b:nth-child(6) {
+  top: calc(72% + 3px);
+  left: 17%;
+  width: 58%;
+  background: #b8332a;
+}
+.mode-sweep[data-to='4'] b:nth-child(7) {
+  top: 87%;
+  left: 67%;
+  width: 28%;
+}
+@keyframes dd-combat-scan {
+  0% {
+    clip-path: inset(0 0 0 0);
+    transform: translateX(8%);
+  }
+  21% {
+    clip-path: inset(0 0 36% 0);
+    transform: translate(-6%, 3px);
+  }
+  46% {
+    clip-path: inset(24% 0 0 0);
+    transform: translate(11%, -5px);
+  }
+  69% {
+    clip-path: inset(50% 0 25% 0);
+    transform: translateX(-12%);
+  }
+  86%,
+  100% {
+    clip-path: inset(100% 0 0 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hud-leaving,
+  .mode-sweep {
+    display: none !important;
+  }
+  .hud-entering {
+    animation: none;
+  }
+}

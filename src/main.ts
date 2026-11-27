@@ -98,8 +98,11 @@ try {
   const result = JSON.parse(storage?.getItem('dust-division.frame-sample') || 'null')
   if (result && typeof result.meanFps === 'number' && typeof result.p95Ms === 'number') lastSample = result
 } catch {}
-const modes = createModes(el('mode-hud'), game, (x, z, h) =>
-  world ? world.project(x, z, h) : { x: 0, y: 0, visible: false },
+const modes = createModes(
+  el('mode-hud'),
+  game,
+  (x, z, h) => (world ? world.project(x, z, h) : { x: 0, y: 0, visible: false }),
+  { overworld: over, shell: app, motionEnabled: () => prefs.motion },
 )
 function statusAudio() {
   audio.classList.toggle('muted', !prefs.audio)
@@ -327,17 +330,17 @@ function refresh(force = false) {
   if (force || signature !== viewSignature) {
     viewSignature = signature
     if (ready) deploy.querySelector('strong')!.textContent = s.raid.active ? 'RESUME SORTIE' : 'ENTER SECTOR'
-    app.dataset.mode = String(s.mode)
     app.classList.toggle('is-driving', driving)
     nav
       .querySelectorAll('button')
       .forEach((b) => b.setAttribute('aria-current', String(Number(b.dataset.mode) === s.mode)))
-    over.hidden = s.mode !== 1
-    hero.hidden = driving
-    landmark.hidden = driving
-    driveInfo.hidden = !driving
-    driveSpeed.hidden = !driving
-    waypoint.hidden = !driving
+    if (s.mode === 1) {
+      hero.hidden = driving
+      landmark.hidden = driving
+      driveInfo.hidden = !driving
+      driveSpeed.hidden = !driving
+      waypoint.hidden = !driving
+    }
     el('keyline').innerHTML = controlLine(s)
     el('status-word').textContent = s.raid.active
       ? s.mode < 3
