@@ -50,6 +50,8 @@ npm run dev
 
 `npm test` 验证驾驶、碰撞、地形、运输、管网、弹反、共鸣、三阶段处决、撤离与存档恢复。页面包含完整的键盘和鼠标入口，可独立复验。
 
+私有测试分支 `qa/acceptance` 每次推送都会运行两项 GitHub Actions 检查。**Verify production game** 用 Chromium 实际驾驶、建造、编队、打完三阶段守卫战并撤离，保存九张截图与浏览器错误记录。**Benchmark production renderers** 对七个场景逐帧采样，在报告中记录显卡、真实绘制尺寸、平均帧率和 P95 帧时间。工作流成功代表测试程序正常完成。是否达到 60 FPS，需查看具体场景的采样值。
+
 推送到目标 GitHub 仓库的 `main` 分支后，`.github/workflows/pages.yml` 会运行测试、构建并部署。仓库 Pages 的构建来源需为 **GitHub Actions**。也可直接将整个 `dist/` 交给静态服务器。
 
 `npm run offline -- ./Dust-Division.html` 生成内嵌脚本、字体与美术资源的单 HTML 离线版，可双击运行。

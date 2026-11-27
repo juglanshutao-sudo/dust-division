@@ -24,6 +24,10 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npx --no-install playwright install --with-deps chromium
+      - name: Open the standalone game from disk with the browser offline
+        run: |
+          npm run offline -- "$RUNNER_TEMP/Dust-Division.html"
+          node scripts/verify-offline.mjs "$RUNNER_TEMP/Dust-Division.html"
       - name: Play the production build in Chromium
         run: npm run test:browser
       - name: Preserve screenshots and renderer diagnostics

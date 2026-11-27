@@ -533,9 +533,12 @@ export function createFallback(canvas: HTMLCanvasElement) {
         block(x, z, 1.46, 0.57, 0.08, ink.accent, ink.shade, ink.dark, 0.65, -a)
       })
     }
+    if (!s.raid.active) return
     const { x, z, radius } = EXTRACTION
-    ellipse(x, z, radius, radius, 0.04, s.raid.evacuating ? '#4c6253' : '#424740', '#78987b')
-    ellipse(x, z, radius * 0.66, radius * 0.66, 0.06, ink.pad, '#97b48c')
+    const beacon = s.mode === 4 ? '#ece8df' : '#00c853'
+    const base = s.mode === 4 ? '#4a4540' : '#35483d'
+    ellipse(x, z, radius, radius, 0.04, base, beacon)
+    ellipse(x, z, radius * 0.66, radius * 0.66, 0.06, ink.pad, beacon)
     if (s.raid.evacuating)
       ellipse(
         x,
@@ -544,7 +547,7 @@ export function createFallback(canvas: HTMLCanvasElement) {
         ((clock % 1.5) / 1.5) * radius,
         0.08,
         'transparent',
-        '#a1c396',
+        beacon,
       )
   }
   function guardian() {

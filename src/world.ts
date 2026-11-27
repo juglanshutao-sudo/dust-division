@@ -248,21 +248,6 @@ export function createWorld(canvas: HTMLCanvasElement) {
     #include <colorspace_fragment>
     }`,
   })
-  // Encode a reusable frame once. Software GL can then present the same RGB
-  // bytes with its native framebuffer copy while particles still render live.
-  const blitCache = new T.WebGLRenderTarget(1, 1, {
-    depthBuffer: false,
-    minFilter: T.NearestFilter,
-    magFilter: T.NearestFilter,
-  })
-  const encodeCache = new T.ShaderMaterial({
-    depthTest: false,
-    depthWrite: false,
-    uniforms: { source: { value: postTarget.texture } },
-    vertexShader: passthrough.vertexShader,
-    fragmentShader: `varying vec2 p;uniform sampler2D source;void main(){gl_FragColor=sRGBTransferOETF(texture2D(source,p));}`,
-  })
-  let copyFramebuffer: WebGLFramebuffer | null = null
   const eye = v3(),
     aim = v3(),
     vEye = v3(),
@@ -333,10 +318,6 @@ export function createWorld(canvas: HTMLCanvasElement) {
       renderer.setPixelRatio(ratio)
       renderer.setSize(width, height, false)
       postTarget.setSize(Math.max(1, Math.round(width * ratio)), Math.max(1, Math.round(height * ratio)))
-      if (software) {
-        blitCache.setSize(postTarget.width, postTarget.height)
-        copyFramebuffer = null
-      }
       post.uniforms.texel.value.set(1 / postTarget.width, 1 / postTarget.height)
       lastWidth = width
       lastHeight = height
@@ -567,33 +548,11 @@ export function createWorld(canvas: HTMLCanvasElement) {
       cacheLight = sun.intensity
     }
     const needsEffect = post.uniforms.kick.value > 0.01 || transition > 0.01
-    if (software && reusable && !needsEffect) {
-      if (refresh || !copyFramebuffer) {
-        screenQuad.material = encodeCache
-        renderer.setRenderTarget(blitCache)
-        renderer.render(postScene, quadCamera)
-        copyFramebuffer = gl.getParameter(gl.FRAMEBUFFER_BINDING) as WebGLFramebuffer
-        renderer.setRenderTarget(null)
-      }
-      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, copyFramebuffer)
-      gl.blitFramebuffer(
-        0,
-        0,
-        blitCache.width,
-        blitCache.height,
-        0,
-        0,
-        gl.drawingBufferWidth,
-        gl.drawingBufferHeight,
-        gl.COLOR_BUFFER_BIT,
-        gl.NEAREST,
-      )
-      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null)
-      renderer.clearDepth()
-    } else {
-      screenQuad.material = needsEffect ? post : passthrough
-      renderer.render(postScene, quadCamera)
-    }
+    // PostTarget contains the opaque scene even when its camera is stationary.
+    // Present through the renderer every frame so the compositor receives the
+    // color attachment before transparent particle and freight layers render.
+    screenQuad.material = needsEffect ? post : passthrough
+    renderer.render(postScene, quadCamera)
     if (reusable) {
       // Reproject each live mote against the cached depth without drawing the
       // opaque vehicle and its directional shadow again.
@@ -660,10 +619,8 @@ export function createWorld(canvas: HTMLCanvasElement) {
     geos.forEach((g) => g.dispose())
     materials.forEach((m) => m.dispose())
     postTarget.dispose()
-    blitCache.dispose()
     post.dispose()
     passthrough.dispose()
-    encodeCache.dispose()
     screenQuad.geometry.dispose()
     if (art.value !== fallback) art.value.dispose()
     fallback.dispose()

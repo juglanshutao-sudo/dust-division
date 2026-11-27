@@ -71,6 +71,7 @@ const report = {
   pageErrors: [],
   requestErrors: [],
   renderErrors: [],
+  pixelChecks: [],
 }
 let browser,
   page,
@@ -131,7 +132,138 @@ async function sampleFrames() {
       }),
   )
 }
+// These samples use the final compositor output. Reading the WebGL drawing buffer after
+// presentation can return cleared pixels, even when the user actually saw a correct frame.
+const sceneProbes = {
+  '01-hero': { region: [0.43, 0.43, 0.77, 0.74], changed: 0.35, darkened: 0.25 },
+  '03-city': { region: [0.22, 0.26, 0.78, 0.75], changed: 0.45 },
+  '04-industry': { region: [0.22, 0.26, 0.78, 0.75], changed: 0.45 },
+  '04-industry-low': { region: [0.22, 0.26, 0.78, 0.75], changed: 0.45 },
+}
+async function checkScenePixels(name) {
+  const probe = sceneProbes[name]
+  if (!probe) return
+  const canvas = page.locator('#world')
+  // Let the camera converge and enter the static geometry cache. Both a minimum
+  // number of presented frames and elapsed time matter on the CI software adapter.
+  await page.evaluate(
+    () =>
+      new Promise((resolve, reject) => {
+        let frames = 0
+        const start = performance.now()
+        const deadline = setTimeout(
+          () => reject(new Error('World presentation stopped while settling')),
+          90_000,
+        )
+        const frame = (now) => {
+          if (++frames >= 36 && now - start >= 2600) {
+            clearTimeout(deadline)
+            resolve()
+          } else requestAnimationFrame(frame)
+        }
+        requestAnimationFrame(frame)
+      }),
+  )
+  const bounds = await canvas.boundingBox()
+  assert.ok(bounds && bounds.width > 0 && bounds.height > 0, 'World canvas must have visible bounds')
+  const [left, top, right, bottom] = probe.region
+  const clip = {
+    x: Math.round(bounds.x + left * bounds.width),
+    y: Math.round(bounds.y + top * bounds.height),
+    width: Math.floor((right - left) * bounds.width),
+    height: Math.floor((bottom - top) * bounds.height),
+  }
+  // Omit overlay lettering, map markers, module selection and the loading illustration
+  // from both images so they cannot pass the geometry check on their own.
+  const clean =
+    '#overworld,#mode-hud,#standby-rover,#reticle,#touch-controls,#notice{visibility:hidden!important}'
+  const picture = await page.screenshot({ clip, style: clean, timeout: 60_000 })
+  const backdrop = await page.screenshot({
+    clip,
+    style: clean + '#world{visibility:hidden!important}',
+    timeout: 60_000,
+  })
+  const metrics = await page.evaluate(
+    async ({ foreground, underlay }) => {
+      async function pixels(source) {
+        const bytes = Uint8Array.from(atob(source), (c) => c.charCodeAt(0))
+        const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/png' }))
+        const canvas = document.createElement('canvas')
+        canvas.width = bitmap.width
+        canvas.height = bitmap.height
+        const ctx = canvas.getContext('2d', { willReadFrequently: true })
+        ctx.drawImage(bitmap, 0, 0)
+        bitmap.close()
+        return ctx.getImageData(0, 0, canvas.width, canvas.height)
+      }
+      const [scene, base] = await Promise.all([pixels(foreground), pixels(underlay)])
+      if (scene.width !== base.width || scene.height !== base.height)
+        throw new Error('Pixel probe size mismatch')
+      const luminance = (data, i) => data[i] * 0.2126 + data[i + 1] * 0.7152 + data[i + 2] * 0.0722
+      const a = scene.data,
+        b = base.data
+      let changed = 0,
+        darker = 0,
+        edges = 0,
+        sum = 0,
+        sumSquares = 0,
+        count = 0
+      for (let y = 0; y < scene.height - 3; y += 2) {
+        for (let x = 0; x < scene.width - 3; x += 2) {
+          const i = (y * scene.width + x) * 4,
+            level = luminance(a, i)
+          if (
+            Math.max(Math.abs(a[i] - b[i]), Math.abs(a[i + 1] - b[i + 1]), Math.abs(a[i + 2] - b[i + 2])) > 24
+          )
+            changed++
+          if (luminance(b, i) - level > 32) darker++
+          const horizontal = Math.abs(level - luminance(a, i + 12))
+          const vertical = Math.abs(level - luminance(a, i + scene.width * 12))
+          if (Math.max(horizontal, vertical) > 20) edges++
+          sum += level
+          sumSquares += level * level
+          count++
+        }
+      }
+      return {
+        sampledPixels: count,
+        changed: changed / count,
+        darkened: darker / count,
+        edgeFraction: edges / count,
+        luminanceDeviation: Math.sqrt(Math.max(0, sumSquares / count - (sum / count) ** 2)),
+      }
+    },
+    { foreground: picture.toString('base64'), underlay: backdrop.toString('base64') },
+  )
+  const valid =
+    metrics.changed >= probe.changed &&
+    metrics.darkened >= (probe.darkened ?? 0) &&
+    metrics.edgeFraction >= 0.03 &&
+    metrics.luminanceDeviation >= 12
+  const record = { name, clip, metrics, valid }
+  report.pixelChecks.push(record)
+  console.log('PIXELS', JSON.stringify(record))
+  if (!valid) {
+    await Promise.all([
+      writeFile(join(output, name + '-failed-scene.png'), picture),
+      writeFile(join(output, name + '-underlay.png'), backdrop),
+    ])
+    assert.fail('Rendered world geometry missing or blank: ' + JSON.stringify(record))
+  }
+}
+async function verifyLowTier() {
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  await page.locator('#quality').selectOption('low')
+  await page.getByRole('button', { name: 'Close dialog' }).click()
+  await page.getByRole('dialog').waitFor({ state: 'hidden' })
+  await checkScenePixels('04-industry-low')
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  await page.locator('#quality').selectOption('auto')
+  await page.getByRole('button', { name: 'Close dialog' }).click()
+  await page.getByRole('dialog').waitFor({ state: 'hidden' })
+}
 async function capture(name) {
+  await checkScenePixels(name)
   const timing = await sampleFrames()
   const hudFps = await page.locator('#frame-data').innerText()
   await page.screenshot({ path: join(output, name + '.png'), timeout: 60_000 })
@@ -259,6 +391,7 @@ try {
     await button('E4 · Generator').waitFor()
     await waitUI('[data-ui="supply"]', 'contains', '16 MW')
     await capture('04-industry')
+    await verifyLowTier()
     await button('Remove').click()
     await button('E4 · Empty footprint').waitFor()
     await waitUI('[data-ui="supply"]', 'contains', '8 MW')

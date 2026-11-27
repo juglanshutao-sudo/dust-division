@@ -14,7 +14,10 @@ export function createFieldObjects(scene: T.Scene) {
     metal = new T.Color('#414a47'),
     charcoal = new T.Color('#222c2a'),
     amber = new T.Color('#c58931'),
-    lamp = new T.Color('#46cf7c')
+    operationalGreen = new T.Color('#00c853'),
+    combatBone = new T.Color('#ece8df'),
+    combatRust = new T.Color('#b8332a'),
+    lamp = operationalGreen.clone()
   const up = new T.Vector3(0, 1, 0),
     start = new T.Vector3(),
     end = new T.Vector3()
@@ -187,7 +190,7 @@ export function createFieldObjects(scene: T.Scene) {
         value: { value: 0 },
         angle: { value: 0 },
         move: { value: 0 },
-        tint: { value: new T.Color(isExit ? '#48c785' : '#ee6850') },
+        tint: { value: new T.Color(isExit ? '#00c853' : '#b8332a') },
         type: { value: isExit ? 1 : 0 },
       },
       vertexShader: `varying vec2 local;void main(){local=position.xz;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
@@ -231,7 +234,12 @@ export function createFieldObjects(scene: T.Scene) {
     shafts.visible = _night > 0.1
     root.visible = s.started || s.mode !== 1
     if (!root.visible) return
+    const combat = s.mode === 4
+    lamp.copy(combat ? combatBone : operationalGreen)
+    packets.material.color.copy(lamp)
+    exit.material.uniforms.tint.value.copy(lamp)
     const key =
+      (combat ? 'combat' : 'field') +
       s.nodes.map((n) => `${n.id}.${n.kind}.${+n.powered}.${+n.linked}`).join('-') +
       '|' +
       s.links.map((l) => `${l.from}.${l.to}.${l.kind}`).join('-')
@@ -281,7 +289,10 @@ export function createFieldObjects(scene: T.Scene) {
       packets.setMatrixAt(j, o.matrix)
     }
     if (packets.count) packets.instanceMatrix.needsUpdate = true
-    const ck = (s.raid.active ? 'n' : 'd') + s.caches.map((c) => (c.claimed ? '1' : '0')).join('')
+    const ck =
+      (combat ? 'combat' : 'field') +
+      (s.raid.active ? 'n' : 'd') +
+      s.caches.map((c) => (c.claimed ? '1' : '0')).join('')
     if (ck !== cacheSignature) {
       cacheSignature = ck
       release(caches)
@@ -289,7 +300,7 @@ export function createFieldObjects(scene: T.Scene) {
       for (const c of s.caches) {
         if (c.claimed || s.raid.active !== c.night) continue
         const y = terrainHeight(c.x, c.z)
-        part(items, box, c.x, y + 0.38, c.z, 1.35, 0.75, 0.88, amber)
+        part(items, box, c.x, y + 0.38, c.z, 1.35, 0.75, 0.88, combat ? combatRust : amber)
         part(items, box, c.x, y + 0.78, c.z, 1.42, 0.14, 0.92, body)
         for (const dx of [-0.44, 0.44]) part(items, box, c.x + dx, y + 0.42, c.z, 0.13, 0.84, 0.95, charcoal)
         part(items, box, c.x, y + 0.56, c.z + 0.47, 0.24, 0.12, 0.05, lamp)
