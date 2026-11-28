@@ -6,7 +6,10 @@ import { Soundscape } from './audio'
 import { createModes } from './modes'
 import { createMinimap } from './minimap'
 import { fillIcons } from './icons'
-import { renderGuide, renderSettings, type Preferences } from './guide'
+import { onLanguageChange, setLanguage, t, uiLanguage } from './language'
+import { bindShellCopy } from './shell-language'
+import { mountGuide } from './guide'
+import { renderSettings, settingText, type Preferences } from './settings'
 
 interface World {
   update(dt: number, s: GameState): void
@@ -64,6 +67,7 @@ sound.setVolume(prefs.volume)
 const keys = new Set<string>(),
   mapDraw = createMinimap(el<HTMLCanvasElement>('minimap'))
 const names = ['Overworld', 'City', 'Industry', 'Combat']
+const localizeShell = bindShellCopy(app)
 nav.innerHTML = names
   .map(
     (name, i) =>
@@ -75,9 +79,9 @@ nav.innerHTML = names
       (i + 1) +
       ']"><small>0' +
       (i + 1) +
-      '</small>' +
+      '</small><span>' +
       name +
-      '</button>',
+      '</span></button>',
   )
   .join('')
 fillIcons()
@@ -110,7 +114,7 @@ function statusAudio() {
   audio.classList.toggle('muted', !prefs.audio)
   audio.classList.toggle('audio-live', prefs.audio && unlocked)
   audio.setAttribute('aria-pressed', String(prefs.audio))
-  audio.setAttribute('aria-label', prefs.audio ? 'Mute audio' : 'Enable audio')
+  audio.setAttribute('aria-label', t(prefs.audio ? 'Mute audio' : 'Enable audio'))
 }
 function unlock() {
   if (!unlocked) {
@@ -128,9 +132,11 @@ function toggleAudio() {
   sound.play('confirm')
 }
 audio.onclick = toggleAudio
+let noticeSource = ''
 function notify(label: string) {
   const box = el('notice')
-  box.textContent = label
+  noticeSource = label
+  box.textContent = t(label)
   box.classList.remove('pop')
   void box.offsetWidth
   box.classList.add('pop')
@@ -163,100 +169,178 @@ deploy.onclick = () => {
 }
 el('park').onclick = () => act('park')
 el('interact').onclick = () => act('interact')
-function showPanel(which: string, index = game.state.mode - 1) {
-  keys.clear()
-  panel = which
-  el('dialog-body').innerHTML =
-    which === 'guide'
-      ? renderGuide(index)
-      : renderSettings(prefs, renderType, fps, world?.stats?.(), lastSample)
-  if (!drawer.open) drawer.showModal()
-  if (which === 'guide') {
-    drawer.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach(
-      (b) =>
-        (b.onclick = () => {
-          showPanel('guide', Number(b.dataset.tab))
-          drawer.querySelector<HTMLButtonElement>('[data-tab="' + b.dataset.tab + '"]')?.focus()
-        }),
-    )
-  } else {
-    el<HTMLSelectElement>('render-path').onchange = (e) => {
-      prefs.compatibility = (e.target as HTMLSelectElement).value === 'canvas'
-      savePrefs()
-      game.save()
-      location.reload()
-    }
-    el<HTMLSelectElement>('quality').onchange = (e) => {
-      prefs.quality = (e.target as HTMLSelectElement).value as Preferences['quality']
-      world?.setQuality?.(prefs.quality)
-      savePrefs()
-    }
-    el<HTMLInputElement>('volume').oninput = (e) => {
-      const percent = (e.target as HTMLInputElement).valueAsNumber
-      prefs.volume = percent / 100
-      sound.setVolume(prefs.volume)
-      el('volume-text').textContent = percent + '%'
-      savePrefs()
-    }
-    el('motion').onclick = () => {
-      prefs.motion = !prefs.motion
-      el('motion').textContent = prefs.motion ? 'FULL' : 'REDUCED'
-      el('motion').setAttribute('aria-pressed', String(prefs.motion))
-      savePrefs()
-    }
-    el('fullscreen').onclick = async () => {
-      try {
-        if (document.fullscreenElement) await document.exitFullscreen()
-        else await document.documentElement.requestFullscreen()
-      } catch {
-        el('fullscreen').textContent = 'UNAVAILABLE'
-        el<HTMLButtonElement>('fullscreen').disabled = true
-      }
-    }
-    el('measure-frames').onclick = () => {
-      sampling = true
-      sampleElapsed = 0
-      sampleLast = 0
-      frameIntervals.length = 0
-      sampleModes.clear()
-      drawer.close()
-      notify('Recording frame times · 10 s')
-    }
-    const exportButton = el<HTMLButtonElement>('export-frames')
-    if (exportButton)
-      exportButton.onclick = () => {
-        if (!lastSample) return
-        const url = URL.createObjectURL(
-          new Blob([JSON.stringify(lastSample, null, 2)], { type: 'application/json' }),
-        )
-        const anchor = document.createElement('a')
-        anchor.href = url
-        anchor.download = 'dust-division-frame-sample.json'
-        anchor.click()
-        setTimeout(() => URL.revokeObjectURL(url), 1000)
-      }
-    el('settings-guide').onclick = () => showPanel('guide')
+let unmountGuide: (() => void) | undefined
+let panelOpener: HTMLElement | null = null
+let guideFromSettings = false
+
+function restorePanelFocus() {
+  if (drawer.open || !panel) return
+  unmountGuide?.()
+  unmountGuide = undefined
+  panel = ''
+  guideFromSettings = false
+  const opener = panelOpener
+  panelOpener = null
+  const target = opener?.isConnected && opener.getClientRects().length ? opener : canvas
+  target.focus({ preventScroll: true })
+  if (location.hash === '#guide' && location.protocol !== 'file:') {
+    const url = new URL(location.href)
+    url.hash = ''
+    history.replaceState(history.state, '', url)
   }
 }
-el('settings').onclick = () => showPanel('settings')
-document.querySelector<HTMLButtonElement>('.guide-trigger')!.onclick = () => showPanel('guide')
-el('close-panel').onclick = () => drawer.close()
-drawer.onclose = () => {
-  panel = ''
+
+function closePanel() {
+  drawer.close()
+  restorePanelFocus()
 }
+
+function leavePanel() {
+  if (panel === 'guide' && guideFromSettings) {
+    showPanel('settings')
+    const guide = el('settings-guide')
+    guide.focus({ preventScroll: true })
+    guide.scrollIntoView({ block: 'nearest' })
+  } else {
+    closePanel()
+  }
+}
+
+function renderPanel(which: 'guide' | 'settings') {
+  unmountGuide?.()
+  unmountGuide = undefined
+  drawer.dataset.panel = which
+  drawer.lang = uiLanguage()
+  const body = el('dialog-body')
+  if (which === 'guide') {
+    unmountGuide = mountGuide(body, leavePanel)
+    return
+  }
+  body.innerHTML = renderSettings(prefs, renderType, fps, world?.stats?.(), lastSample, sampling)
+  el<HTMLSelectElement>('ui-language').onchange = (e) => {
+    const language = (e.target as HTMLSelectElement).value === 'zh-CN' ? 'zh-CN' : 'en'
+    setLanguage(language)
+    el('ui-language').focus({ preventScroll: true })
+  }
+  bindSettings()
+}
+
+function showPanel(which: 'guide' | 'settings', opener?: HTMLElement) {
+  keys.clear()
+  if (!drawer.open) {
+    const active = document.activeElement
+    panelOpener = opener ?? (active instanceof HTMLElement && active !== document.body ? active : canvas)
+  }
+  guideFromSettings = which === 'guide' && panel === 'settings'
+  panel = which
+  renderPanel(which)
+  if (!drawer.open) drawer.showModal()
+  drawer.scrollTop = 0
+  el('dialog-title').focus({ preventScroll: true })
+}
+
+onLanguageChange(() => {
+  if (!drawer.open || (panel !== 'guide' && panel !== 'settings')) return
+  const id = document.activeElement?.id
+  const scroll = drawer.scrollTop
+  renderPanel(panel)
+  if (id) document.getElementById(id)?.focus({ preventScroll: true })
+  drawer.scrollTop = scroll
+})
+
+function bindSettings() {
+  el<HTMLSelectElement>('render-path').onchange = (e) => {
+    prefs.compatibility = (e.target as HTMLSelectElement).value === 'canvas'
+    savePrefs()
+    game.save()
+    location.reload()
+  }
+  el<HTMLSelectElement>('quality').onchange = (e) => {
+    prefs.quality = (e.target as HTMLSelectElement).value as Preferences['quality']
+    world?.setQuality?.(prefs.quality)
+    savePrefs()
+  }
+  el<HTMLInputElement>('volume').oninput = (e) => {
+    const percent = (e.target as HTMLInputElement).valueAsNumber
+    prefs.volume = percent / 100
+    sound.setVolume(prefs.volume)
+    el('volume-text').textContent = percent + '%'
+    savePrefs()
+  }
+  el('motion').onclick = () => {
+    prefs.motion = !prefs.motion
+    el('motion').textContent = settingText(prefs.motion ? 'FULL' : 'REDUCED')
+    el('motion').setAttribute('aria-pressed', String(prefs.motion))
+    savePrefs()
+  }
+  const fullscreen = el<HTMLButtonElement>('fullscreen')
+  fullscreen.onclick = async () => {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen()
+      else await document.documentElement.requestFullscreen()
+    } catch {
+      fullscreen.textContent = settingText('UNAVAILABLE')
+      fullscreen.disabled = true
+    }
+  }
+  el('measure-frames').onclick = () => {
+    sampling = true
+    sampleElapsed = 0
+    sampleLast = 0
+    frameIntervals.length = 0
+    sampleModes.clear()
+    closePanel()
+    notify('Recording frame times · 10 s')
+  }
+  const exportButton = el<HTMLButtonElement>('export-frames')
+  if (exportButton)
+    exportButton.onclick = () => {
+      if (!lastSample) return
+      const url = URL.createObjectURL(
+        new Blob([JSON.stringify(lastSample, null, 2)], { type: 'application/json' }),
+      )
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = 'dust-division-frame-sample.json'
+      anchor.click()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+    }
+  el('settings-guide').onclick = () => showPanel('guide')
+}
+document.addEventListener('fullscreenchange', () => {
+  if (drawer.open && panel === 'settings')
+    el('fullscreen').textContent = settingText(document.fullscreenElement ? 'EXIT FULLSCREEN' : 'FULLSCREEN')
+})
+el('settings').onclick = () => showPanel('settings', el('settings'))
+const guideTrigger = document.querySelector<HTMLButtonElement>('.guide-trigger')!
+guideTrigger.onclick = () => showPanel('guide', guideTrigger)
+el('close-panel').onclick = leavePanel
+drawer.oncancel = (e) => {
+  e.preventDefault()
+  leavePanel()
+}
+drawer.onkeydown = (e) => {
+  if (panel === 'guide' && e.code === 'KeyH' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!e.repeat) leavePanel()
+  }
+}
+drawer.onclose = restorePanelFocus
 drawer.onclick = (e) => {
   if (e.target === drawer) {
     const r = drawer.getBoundingClientRect()
-    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) drawer.close()
+    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) leavePanel()
   }
 }
 const touch = el('touch-controls')
-touch.innerHTML = [
+const movementButtons = [
   ['KeyW', '↑', 'Move forward'],
   ['KeyA', '←', 'Move left'],
   ['KeyS', '↓', 'Move back'],
   ['KeyD', '→', 'Move right'],
 ]
+touch.innerHTML = movementButtons
   .map(
     ([code, label, title]) =>
       '<button aria-label="' + title + '" data-code="' + code + '">' + label + '</button>',
@@ -318,7 +402,7 @@ function controlLine(s: GameState) {
                 ['J / K', 'Strike / parry'],
                 ['Q', 'Switch'],
               ]
-  return items.map(([k, v]) => '<span><kbd>' + k + '</kbd>' + v + '</span>').join('')
+  return items.map(([k, v]) => '<span><kbd>' + t(k) + '</kbd>' + t(v) + '</span>').join('')
 }
 let lastTime = '',
   lastWeather = '',
@@ -332,8 +416,9 @@ function refresh(force = false) {
   if (force || signature !== viewSignature) {
     viewSignature = signature
     if (ready) {
-      deployLabel.textContent = s.raid.active ? 'RESUME SORTIE' : 'ENTER SECTOR'
-      deployTranslation.hidden = s.raid.active
+      const zh = uiLanguage() === 'zh-CN'
+      deployLabel.textContent = t(s.raid.active ? 'RESUME SORTIE' : 'ENTER SECTOR')
+      deployTranslation.hidden = zh || s.raid.active
     }
     app.classList.toggle('is-driving', driving)
     nav
@@ -347,30 +432,32 @@ function refresh(force = false) {
       waypoint.hidden = !driving
     }
     el('keyline').innerHTML = controlLine(s)
-    el('status-word').textContent = s.raid.active
-      ? s.mode < 3
-        ? 'SORTIE PAUSED'
-        : 'SORTIE ACTIVE'
-      : s.mode === 3
-        ? 'GRID ONLINE'
-        : s.mode === 4
-          ? 'SQUAD LINKED'
-          : 'SYSTEM ONLINE'
+    el('status-word').textContent = t(
+      s.raid.active
+        ? s.mode < 3
+          ? 'SORTIE PAUSED'
+          : 'SORTIE ACTIVE'
+        : s.mode === 3
+          ? 'GRID ONLINE'
+          : s.mode === 4
+            ? 'SQUAD LINKED'
+            : 'SYSTEM ONLINE',
+    )
     touch.hidden =
       !matchMedia('(pointer:coarse)').matches ||
       !s.started ||
       !(s.mode <= 2 || (s.raid.active && s.mode >= 3))
   }
   if (s.mode === 1) {
-    const t =
+    const time =
       Math.floor(s.hour).toString().padStart(2, '0') +
       ':' +
       Math.floor((s.hour % 1) * 60)
         .toString()
         .padStart(2, '0')
-    if (t !== lastTime) {
-      el('local-hour').textContent = t
-      lastTime = t
+    if (time !== lastTime) {
+      el('local-hour').textContent = time
+      lastTime = time
     }
     if (String(s.day) !== lastDay) {
       el('local-day').textContent = 'D' + String(s.day).padStart(2, '0')
@@ -380,7 +467,7 @@ function refresh(force = false) {
       weather = { clear: 'Clear', wind: 'Crosswind', dust: 'Dust front' }[s.weather],
       reading = weather + temp
     if (reading !== lastWeather) {
-      el('atmosphere').innerHTML = weather + ' <em>/ ' + temp + '°C</em>'
+      el('atmosphere').innerHTML = t(weather) + ' <em>/ ' + temp + '°C</em>'
       lastWeather = reading
     }
     if (driving) {
@@ -393,7 +480,7 @@ function refresh(force = false) {
         lastSpeed = k
       }
       if (lastContext !== game.context) {
-        el('waypoint-name').textContent = game.context
+        el('waypoint-name').textContent = t(game.context)
         lastContext = game.context
       }
     }
@@ -563,7 +650,9 @@ function frame(ms: number) {
   if (ms - sampleStart >= 1200) {
     fps = Math.min(360, (frames * 1000) / (ms - sampleStart))
     el('frame-data').textContent = sampling
-      ? 'REC ' + Math.max(0, Math.ceil((10000 - sampleElapsed) / 1000)) + ' S'
+      ? (uiLanguage() === 'zh-CN' ? '采样 ' : 'REC ') +
+        Math.max(0, Math.ceil((10000 - sampleElapsed) / 1000)) +
+        (uiLanguage() === 'zh-CN' ? ' 秒' : ' S')
       : Math.round(fps) + ' FPS'
     frames = 0
     sampleStart = ms
@@ -605,6 +694,33 @@ async function boot() {
   refresh(true)
   deploy.disabled = false
   app.setAttribute('aria-busy', 'false')
+  const openLinkedGuide = () => {
+    if (location.hash === '#guide') showPanel('guide', guideTrigger)
+  }
+  window.addEventListener('hashchange', openLinkedGuide)
+  openLinkedGuide()
   requestAnimationFrame(frame)
 }
+function applyLanguage() {
+  localizeShell()
+  const zh = uiLanguage() === 'zh-CN'
+  nav.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((button, i) => {
+    const label = t(names[i])
+    button.querySelector('span')!.textContent = label
+    button.title = label + ' [' + (i + 1) + ']'
+  })
+  for (const [code, , label] of movementButtons) {
+    touch.querySelector('[data-code="' + code + '"]')?.setAttribute('aria-label', t(label))
+  }
+  if (!ready) deployLabel.textContent = t('LOADING SECTOR')
+  hero.querySelector<HTMLElement>('.hero-zh-world')!.hidden = zh
+  hero.querySelector<HTMLElement>('.hero-translation-dot')!.hidden = zh
+  statusAudio()
+  if (noticeTime > 0) el('notice').textContent = t(noticeSource)
+  lastWeather = ''
+  lastContext = ''
+  if (ready) refresh(true)
+}
+onLanguageChange(applyLanguage)
+applyLanguage()
 void boot()

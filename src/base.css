@@ -713,8 +713,7 @@ kbd {
   letter-spacing: -0.02em;
   margin: 0 0 20px;
 }
-.pref,
-.guide-row {
+.pref {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -725,8 +724,7 @@ kbd {
 }
 .pref button,
 .pref select,
-.dialog-command,
-.tab-guide {
+.dialog-command {
   min-height: 32px;
   border: 1px solid var(--line);
   padding: 6px 11px;
@@ -749,30 +747,6 @@ kbd {
   background: var(--accent);
   color: #1b1e1b;
   border: 0;
-}
-.guide-tabs {
-  display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
-  margin: 0 0 14px;
-}
-.tab-guide[aria-pressed='true'] {
-  background: var(--ink);
-  color: var(--paper);
-}
-.guide-copy {
-  font:
-    400 14px/1.7 'DM Sans',
-    sans-serif;
-  margin: 0 0 14px;
-  color: var(--ink);
-}
-.guide-row {
-  font-size: 13px;
-  padding: 8px 0;
-}
-.guide-row kbd {
-  font-size: 11px;
 }
 #touch-controls {
   pointer-events: none;
@@ -1202,4 +1176,32 @@ kbd {
 }
 .sample-result button {
   text-decoration: underline;
+}
+
+/* Keep functional Chinese labels legible without changing the bilingual title lockups. */
+html:lang(zh-CN)
+  :is(.nav-mode > span, .guide-trigger > [data-copy], .status-online, #keyline, .park-command, #notice) {
+  font-family: var(--zh-sans);
+}
+html:lang(zh-CN) .launch-copy strong {
+  font-family: var(--zh-sans);
+  letter-spacing: 0.08em;
+}
+html:lang(zh-CN) .drive-info h2 {
+  font-family: var(--zh-serif);
+  font-style: normal;
+}
+#intro-guide {
+  min-height: 32px;
+  text-underline-offset: 4px;
+}
+#intro-guide:hover [data-copy],
+#intro-guide:focus-visible [data-copy] {
+  text-decoration: underline;
+}
+@media (max-width: 650px) {
+  #intro-guide {
+    font-size: 10px;
+    min-height: var(--hud-bottom);
+  }
 }

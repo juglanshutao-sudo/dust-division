@@ -1,0 +1,42 @@
+#drawer[data-panel='settings'] :is(.pref button, .pref select, .dialog-command, .sample-result, .pref small) {
+  font-family: var(--mono), var(--zh-sans);
+}
+.settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+.settings-head #dialog-title {
+  margin: 0;
+}
+.settings-head .dialog-command {
+  margin: 0;
+  padding: 5px 1px;
+  background: transparent;
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-underline-offset: 4px;
+}
+#drawer[data-panel='settings'][lang='zh-CN'] #dialog-title {
+  font-family: var(--zh-sans);
+  font-size: 36px;
+  line-height: 1.15;
+}
+#drawer[data-panel='settings'] .pref select {
+  max-width: 61%;
+}
+@media (max-width: 420px), (max-height: 660px) {
+  #drawer[data-panel='settings'] #dialog-body {
+    padding: 18px;
+  }
+  #drawer[data-panel='settings'] .pref {
+    gap: 8px;
+    padding: 8px 0;
+  }
+  #drawer[data-panel='settings'] .pref input[type='range'] {
+    width: 78px;
+  }
+}

@@ -1,4 +1,6 @@
 import { BUILDINGS, CREW, EXTRACTION, Game, LOCATIONS, gridToWorld } from './sim'
+import { bindHudCopy, hudText as h } from './hud-language'
+import { onLanguageChange, uiLanguage } from './language'
 import './modes.css'
 import './mode-transition.css'
 
@@ -143,6 +145,7 @@ export function createModes(
   const motionPreference = container.ownerDocument.defaultView?.matchMedia?.(
     '(prefers-reduced-motion: reduce)',
   )
+  let translateStatic: (() => void) | undefined
   let page: string | undefined
   let outgoing: HTMLElement | null = null
   let previousHeroStyle = ''
@@ -170,7 +173,7 @@ export function createModes(
   const field = (key: string) => element('[data-ui="' + key + '"]')
   function write(key: string, value: string | number) {
     const el = field(key),
-      txt = String(value)
+      txt = typeof value === 'number' ? String(value) : h(value)
     if (el.textContent !== txt) el.textContent = txt
   }
   function attr(el: Element, key: string, value: string) {
@@ -270,6 +273,7 @@ export function createModes(
         // Move the actual visual, including projected labels, away from the delegated control listeners.
         outgoing = document.createElement('div')
         outgoing.className = 'mode-huds'
+        outgoing.dataset.language = uiLanguage()
         outgoing.append(previous)
         container.append(outgoing)
       }
@@ -347,6 +351,14 @@ export function createModes(
           .join('') +
         `<button class="mh-loot-point" data-beacon data-command="extract" title="Activate extraction beacon">${icon('beacon')}<span>LZ</span></button>`
     }
+    translateStatic = root.firstElementChild ? bindHudCopy(root.firstElementChild as HTMLElement) : undefined
+    refreshLanguage()
+  }
+
+  function refreshLanguage() {
+    root.dataset.language = uiLanguage()
+    translateStatic?.()
+    lastSignature = ''
   }
 
   function updateCity(box: DOMRect) {
@@ -358,10 +370,11 @@ export function createModes(
     )
     write(
       'weather',
-      'Day ' +
-        String(s.day).padStart(2, '0') +
-        ' / ' +
-        { clear: 'Clear', wind: 'Crosswind', dust: 'Dust front' }[s.weather],
+      h(
+        'Day {0} / {1}',
+        String(s.day).padStart(2, '0'),
+        h({ clear: 'Clear', wind: 'Crosswind', dust: 'Dust front' }[s.weather]),
+      ),
     )
     for (const kind of ['alloy', 'ore', 'cores'] as const) write(kind, floor(s.stock[kind]))
     const near = s.caches
@@ -372,31 +385,30 @@ export function createModes(
     write(
       'event',
       s.delivery.active
-        ? 'Motor Pool · ' + Math.ceil(s.delivery.timeLeft) + ' s'
+        ? h('Motor Pool · {0} s', Math.ceil(s.delivery.timeLeft))
         : near
-          ? 'Salvage · ' + Math.round(Math.hypot(near.x - s.rover.x, near.z - s.rover.z)) + ' m'
+          ? h('Salvage · {0} m', Math.round(Math.hypot(near.x - s.rover.x, near.z - s.rover.z)))
           : 'All caches recovered',
     )
     const report = s.report
     const dispatch = element('.city-dispatch')
     if (report) {
-      const label = report.success ? 'Cargo banked' : 'Sortie lost'
-      write(
-        'event',
-        report.success ? '+' + report.alloy + ' alloy / +' + report.cores + ' core' : report.reason,
-      )
+      const label = h(report.success ? 'Cargo banked' : 'Sortie lost')
+      write('event', report.success ? h('+{0} alloy / +{1} core', report.alloy, report.cores) : report.reason)
       const cap = dispatch.querySelector('.mh-cap')!
       if (cap.textContent !== label) cap.textContent = label
-      if (!dispatch.querySelector('button')) {
-        const dismiss = document.createElement('button')
+      let dismiss = dispatch.querySelector('button')
+      if (!dismiss) {
+        dismiss = document.createElement('button')
         dismiss.dataset.command = 'dismiss'
-        dismiss.setAttribute('aria-label', 'Dismiss sortie report')
-        dismiss.textContent = 'Close'
         dispatch.append(dismiss)
       }
-    } else if (dispatch.querySelector('button')) {
-      dispatch.querySelector('button')!.remove()
-      dispatch.querySelector('.mh-cap')!.textContent = 'Street dispatch'
+      attr(dismiss, 'aria-label', h('Dismiss sortie report'))
+      if (dismiss.textContent !== h('Close')) dismiss.textContent = h('Close')
+    } else {
+      dispatch.querySelector('button')?.remove()
+      const cap = dispatch.querySelector('.mh-cap')!
+      if (cap.textContent !== h('Street dispatch')) cap.textContent = h('Street dispatch')
     }
     for (const place of LOCATIONS) {
       const el = element<HTMLButtonElement>('[data-district="' + place.id + '"]')
@@ -404,22 +416,22 @@ export function createModes(
       const isDepot = place.id === 'depot'
       const delivery = isDepot && s.delivery.active
       const action = delivery
-        ? 'Deliver freight · ' + s.delivery.reward + ' alloy'
+        ? h('Deliver freight · {0} alloy', s.delivery.reward)
         : isDepot
           ? s.rank >= 5
-            ? 'Fully refitted'
-            : 'Refit · ' + game.upgradeCost + ' alloy'
-          : place.action
+            ? h('Fully refitted')
+            : h('Refit · {0} alloy', game.upgradeCost)
+          : h(place.action)
       el.disabled = delivery
         ? Math.hypot(s.rover.x - place.x, s.rover.z - place.z) > place.radius + 5
         : isDepot && (s.rank >= 5 || s.stock.alloy < game.upgradeCost || s.raid.active)
       attr(el, 'title', action)
-      attr(el, 'aria-label', place.name + ' · ' + action)
+      attr(el, 'aria-label', h(place.name) + ' · ' + action)
       if (isDepot) {
         const name = el.querySelector('.place-name')!
         const label = delivery
-          ? 'Deliver freight'
-          : 'Motor Pool · ' + (s.rank >= 5 ? 'MAX' : game.upgradeCost)
+          ? h('Deliver freight')
+          : h('Motor Pool · {0}', s.rank >= 5 ? h('MAX') : game.upgradeCost)
         if (name.textContent !== label) name.textContent = label
       }
     }
@@ -428,8 +440,8 @@ export function createModes(
   function updatePlant(box: DOMRect) {
     const s = game.state,
       { power } = s
-    write('alloy-cost', floor(s.stock.alloy) + ' alloy')
-    write('output-rate', '+' + power.rate + ' alloy / min')
+    write('alloy-cost', h('{0} alloy', floor(s.stock.alloy)))
+    write('output-rate', h('+{0} alloy / min', power.rate))
     write('used', power.used)
     write('supply', '/ ' + power.supply + ' MW')
     attr(field('load'), 'data-load', power.demand > power.used ? 'over' : 'ok')
@@ -437,6 +449,7 @@ export function createModes(
     for (const kind of kinds) {
       const btn = element<HTMLButtonElement>('[data-kind="' + kind + '"]')
       btn.disabled = s.stock.alloy < BUILDINGS[kind].cost
+      attr(btn, 'title', h('Select {0} · {1} alloy', h(BUILDINGS[kind].name), BUILDINGS[kind].cost))
       attr(btn, 'aria-pressed', String(s.buildKind === kind))
     }
     const inspected = selectedCell >= 0 ? selectedCell : hoveredCell
@@ -449,11 +462,19 @@ export function createModes(
       node
         ? [
             selected,
-            BUILDINGS[node.kind].name,
-            node.kind === 'belt' ? (node.linked ? 'Linked' : 'Idle') : node.powered ? 'Online' : 'Unpowered',
+            h(BUILDINGS[node.kind].name),
+            h(
+              node.kind === 'belt'
+                ? node.linked
+                  ? 'Linked'
+                  : 'Idle'
+                : node.powered
+                  ? 'Online'
+                  : 'Unpowered',
+            ),
           ].join(' / ')
         : selected
-          ? selected + ' / Place ' + BUILDINGS[s.buildKind].name
+          ? selected + ' / ' + h('Place {0}', h(BUILDINGS[s.buildKind].name))
           : 'Select a build site',
     )
     const signature = s.nodes.map((n) => n.id + ':' + n.col + ':' + n.row).join(';') + '/' + selectedCell
@@ -467,7 +488,7 @@ export function createModes(
         attr(
           el,
           'aria-label',
-          cellName(i % 7, Math.floor(i / 7)) + ' · ' + (n ? BUILDINGS[n.kind].name : 'Empty footprint'),
+          cellName(i % 7, Math.floor(i / 7)) + ' · ' + h(n ? BUILDINGS[n.kind].name : 'Empty footprint'),
         )
       })
     }
@@ -497,11 +518,11 @@ export function createModes(
     const bearing =
       ((Math.atan2(EXTRACTION.x - s.party.x, s.party.z - EXTRACTION.z) * 180) / Math.PI + 360) % 360
     write('evac-bearing', String(Math.round(bearing) % 360).padStart(3, '0') + '°')
-    write('evac-range', r.extraction >= 0 ? 'Hold position' : Math.ceil(range) + ' m / Landing zone')
+    write('evac-range', r.extraction >= 0 ? 'Hold position' : h('{0} m / Landing zone', Math.ceil(range)))
     write(
       'evac',
       r.extraction >= 0
-        ? 'Uplink ' + Math.max(0, r.extraction).toFixed(1) + ' s'
+        ? h('Uplink {0} s', Math.max(0, r.extraction).toFixed(1))
         : r.evacuating
           ? 'Beacon active'
           : 'Call extraction',
@@ -516,7 +537,8 @@ export function createModes(
       }
       pin(el, c.x, c.z, 1.2, box, ' translate(-50%,-100%)')
       const distance = Math.hypot(c.x - s.party.x, c.z - s.party.z)
-      const txt = distance <= 5.5 ? 'Search +' + c.amount : Math.ceil(distance) + ' m'
+      attr(el, 'title', h('Search cache · {0} alloy', c.amount))
+      const txt = distance <= 5.5 ? h('Search +{0}', c.amount) : h('{0} m', Math.ceil(distance))
       el.disabled = distance > 5.5
       const caption = el.querySelector('span')!
       if (caption.textContent !== txt) caption.textContent = txt
@@ -530,10 +552,13 @@ export function createModes(
       p = s.party,
       live = s.raid.active
     const ratio = live ? b.hp / b.maxHp : 1
-    write('arena-status', live ? 'Exclusion zone / ' + dashTime(s.raid.timeLeft) : 'Encounter preparation')
+    write(
+      'arena-status',
+      live ? h('Exclusion zone / {0}', dashTime(s.raid.timeLeft)) : 'Encounter preparation',
+    )
     attr(field('boss-bar'), 'value', String(Math.round(ratio * 100)))
     write('boss-pct', Math.ceil(ratio * 100) + '%')
-    write('phase', 'P' + (live ? b.phase : 1) + ' / 3')
+    write('phase', h('P{0} / 3', live ? b.phase : 1))
     const windup = live && b.stage === 'windup'
     const hot = windup && b.stageTime <= 0.26
     const paused = Boolean((document.getElementById('drawer') as HTMLDialogElement | null)?.open)
@@ -582,7 +607,7 @@ export function createModes(
         : stage === 'windup'
           ? hot
             ? 'PARRY'
-            : b.stageTime.toFixed(1) + ' s'
+            : h('{0} s', b.stageTime.toFixed(1))
           : stage === 'broken'
             ? 'EXECUTE'
             : 'LIVE',
@@ -612,7 +637,7 @@ export function createModes(
       const effects = { Line: '+8% strike damage', Wedge: '+12% stagger', Dispersed: '−15% damage taken' }
       write('link-style', p.linkStyle)
       write('link-effect', effects[p.linkStyle])
-      write('tile-help', 'Place ' + CREW[p.active].name + ' on a tile')
+      write('tile-help', h('Place {0} on a tile', h(CREW[p.active].name)))
       for (let i = 0; i < 9; i++) {
         const tile = element<HTMLButtonElement>('[data-tile="' + i + '"]')
         const occupant = p.positions.indexOf(i)
@@ -623,10 +648,10 @@ export function createModes(
         const coordinate = cellName(i % 3, Math.floor(i / 3))
         const action =
           occupant < 0
-            ? 'Place ' + CREW[p.active].name
+            ? h('Place {0}', h(CREW[p.active].name))
             : occupant === p.active
-              ? CREW[occupant].name + ' deployed'
-              : 'Swap ' + CREW[p.active].name + ' with ' + CREW[occupant].name
+              ? h('{0} deployed', h(CREW[occupant].name))
+              : h('Swap {0} with {1}', h(CREW[p.active].name), h(CREW[occupant].name))
         attr(tile, 'aria-label', coordinate + ' · ' + action)
         attr(tile, 'title', coordinate + ' · ' + action)
         attr(tile, 'aria-pressed', String(occupant === p.active))
@@ -638,8 +663,8 @@ export function createModes(
     const links = field('live-links')
     links.hidden = !live
     if (live) {
-      write('live-links', p.bond + ' / ' + p.linkStyle)
-      attr(links, 'title', 'Bond · ' + p.bond + ' · Formation · ' + p.linkStyle)
+      write('live-links', h(p.bond) + ' / ' + h(p.linkStyle))
+      attr(links, 'title', h('Bond · {0} · Formation · {1}', h(p.bond), h(p.linkStyle)))
     }
     const bonds: Record<string, string> = {
       Bulwark: 'Extended parry',
@@ -648,7 +673,7 @@ export function createModes(
     }
     write(
       'squad-information',
-      live ? 'Integrity ' + Math.ceil(p.hp) + ' / ' + p.maxHp : (bonds[p.bond] ?? 'Formation set'),
+      live ? h('Integrity {0} / {1}', Math.ceil(p.hp), p.maxHp) : (bonds[p.bond] ?? 'Formation set'),
     )
     attr(field('party-bar'), 'value', String(Math.ceil((p.hp / p.maxHp) * 100)))
     field('party-bar').hidden = !live
@@ -664,7 +689,11 @@ export function createModes(
       write('element-' + i, op.element)
       btn.disabled = live && p.switchCooldown > 0
       attr(btn, 'aria-pressed', String(id === p.active))
-      attr(btn, 'title', (live ? 'Switch to ' : 'Set formation lead · ') + op.name + ' / ' + op.role)
+      attr(
+        btn,
+        'title',
+        h(live ? 'Switch to {0} / {1}' : 'Set formation lead · {0} / {1}', h(op.name), h(op.role)),
+      )
     })
     element('[data-command="raid"]').hidden = live
     field('combat-acts').hidden = !live
@@ -717,22 +746,24 @@ export function createModes(
       const fill = Math.max(0, Math.min(1, fraction)).toFixed(3)
       if (btn.style.getPropertyValue('--action-meter') !== fill) btn.style.setProperty('--action-meter', fill)
       btn.classList.toggle('window', command === 'parry' && hot && state === 'ready')
-      const seconds = remaining > 0 ? (Math.ceil(remaining * 10) / 10).toFixed(1) + ' s' : ''
+      const seconds = remaining > 0 ? h('{0} s', (Math.ceil(remaining * 10) / 10).toFixed(1)) : ''
       const status = paused
         ? 'Paused'
         : !live
           ? 'Encounter preparation'
           : lock || seconds || (hitstopLock ? 'Impact hold' : 'Ready')
       const name = command[0].toUpperCase() + command.slice(1)
-      const hint = window ? ' · Core exposed until sortie ends · ' + Math.ceil(s.raid.timeLeft) + ' s' : ''
-      attr(btn, 'title', name + ' · ' + btn.dataset.key + ' · ' + status + hint)
-      attr(btn, 'aria-description', status + hint)
+      const hint = window
+        ? ' · ' + h('Core exposed until sortie ends · {0} s', Math.ceil(s.raid.timeLeft))
+        : ''
+      attr(btn, 'title', h(name) + ' · ' + h(btn.dataset.key!) + ' · ' + h(status) + hint)
+      attr(btn, 'aria-description', h(status) + hint)
       write(
         'timer-' + command,
         confirmation
           ? 'OK'
           : window
-            ? Math.ceil(s.raid.timeLeft) + 's'
+            ? h('{0}s', Math.ceil(s.raid.timeLeft))
             : showCooldown
               ? seconds.replace(' ', '')
               : '',
@@ -817,6 +848,10 @@ export function createModes(
     if (page === 'plant') updatePlant(box)
     if (page === 'raid') updateRaid(box)
   }
+  const unsubscribeLanguage = onLanguageChange(() => {
+    refreshLanguage()
+    update()
+  })
   motionPreference?.addEventListener?.('change', reduceMotion)
   root.addEventListener('click', onclick)
   root.addEventListener('keydown', onKey)
@@ -825,6 +860,7 @@ export function createModes(
   return {
     update,
     destroy() {
+      unsubscribeLanguage()
       endTransition()
       motionPreference?.removeEventListener?.('change', reduceMotion)
       root.removeEventListener('click', onclick)

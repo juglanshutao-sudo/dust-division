@@ -1384,3 +1384,14 @@
     top: calc(100% + 3px);
   }
 }
+
+/* Keep established bilingual proper names. Localized eyebrows need only one Chinese label. */
+.mode-huds[data-language='zh-CN'] :is(.city-eyeline, .industry-eyeline) :is(.eyeline-zh, .caption-separator) {
+  display: none;
+}
+.mode-huds[data-language='zh-CN'] :is(.mh-cap, .plant-tool span, .place-name, .combat-act) {
+  letter-spacing: 0.04em;
+}
+.mode-huds[data-language='zh-CN'] :is(.plant-inspector, .formation-readout, .squad-information) {
+  line-height: 1.4;
+}

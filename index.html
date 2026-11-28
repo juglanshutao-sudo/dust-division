@@ -21,7 +21,8 @@
         <section id="overworld" aria-label="Overworld">
           <div class="hero-copy">
             <div class="eyebrow">
-              <i class="signal-dot"></i><span>OPEN WORLD</span><b>/</b><span>SECTOR 07</span><b>·</b>
+              <i class="signal-dot"></i><span data-copy>OPEN WORLD</span><b>/</b
+              ><span data-copy>SECTOR 07</span><b class="hero-translation-dot">·</b>
               <span class="hero-zh-world" lang="zh-CN">开放荒原</span>
             </div>
             <h1><span>DUST</span><span>DIVISION</span></h1>
@@ -38,38 +39,39 @@
             </button>
           </div>
           <div class="landmark" aria-hidden="true">
-            <i></i><span>HELIOSTAT<br /><b>ARRAY 07</b></span>
+            <i></i><span><span data-copy>HELIOSTAT</span><br /><b data-copy>ARRAY 07</b></span>
           </div>
           <div class="drive-info" hidden>
-            <div class="eyebrow"><i class="signal-dot"></i>FIELD DRIVE</div>
-            <h2>Ashline Expanse</h2>
-            <button id="park" class="park-command">Park rover <kbd>R</kbd></button>
+            <div class="eyebrow"><i class="signal-dot"></i><span data-copy>FIELD DRIVE</span></div>
+            <h2 data-copy>Ashline Expanse</h2>
+            <button id="park" class="park-command"><span data-copy>Park rover</span> <kbd>R</kbd></button>
           </div>
           <div class="drive-speed" hidden>
-            <strong id="kph">00</strong> <span>KM/H</span><i id="speed-meter"></i>
+            <strong id="kph">00</strong> <span data-copy>KM/H</span><i id="speed-meter"></i>
           </div>
           <div class="waypoint" hidden>
-            <span>WAYPOINT</span><strong id="waypoint-name"></strong
-            ><button id="interact"><kbd>E</kbd><span>Interact</span></button>
+            <span data-copy>WAYPOINT</span><strong id="waypoint-name"></strong
+            ><button id="interact"><kbd>E</kbd><span data-copy>Interact</span></button>
           </div>
           <div class="field-readings">
             <div class="reading">
               <span class="read-icon" data-icon="clock"></span>
               <div>
-                <small>LOCAL TIME</small
+                <small data-copy>LOCAL TIME</small
                 ><strong><span id="local-hour">07:40</span> <em id="local-day">D01</em></strong>
               </div>
             </div>
             <div class="reading">
               <span class="read-icon" data-icon="weather"></span>
               <div>
-                <small>ATMOSPHERE</small><strong id="atmosphere">Clear <em>/ 28°C</em></strong>
+                <small data-copy>ATMOSPHERE</small><strong id="atmosphere">Clear <em>/ 28°C</em></strong>
               </div>
             </div>
           </div>
           <aside class="sector-map" aria-label="Sector minimap">
             <div class="map-title">
-              <span><i></i> SECTOR MAP</span><b>N ↑</b>
+              <span><i></i> <span data-copy>SECTOR MAP</span></span
+              ><b data-copy>N ↑</b>
             </div>
             <canvas
               id="minimap"
@@ -77,7 +79,7 @@
               height="135"
               aria-label="Position of rover and districts"
             ></canvas>
-            <div class="map-scale"><span>ASHLINE BASIN</span><span>100 M</span></div>
+            <div class="map-scale"><span data-copy>ASHLINE BASIN</span><span data-copy>100 M</span></div>
           </aside>
         </section>
         <div id="mode-hud"></div>
@@ -94,7 +96,7 @@
         <div class="header-actions">
           <button id="audio" aria-label="Mute audio" title="Toggle audio [M]">
             <span class="audio-bars"><i></i><i></i><i></i><i></i><i></i></span
-            ><span class="audio-label">AUDIO</span></button
+            ><span class="audio-label" data-copy>AUDIO</span></button
           ><span class="hair"></span
           ><button
             id="settings"
@@ -111,14 +113,19 @@
         >
         <div id="keyline"></div>
         <div class="foot-end">
-          <button class="guide-trigger" title="Field guide [H]" aria-label="Open field guide">
-            <span data-icon="book"></span>FIELD GUIDE <kbd>H</kbd></button
+          <button
+            id="intro-guide"
+            class="guide-trigger"
+            title="Starter guide [H]"
+            aria-label="Open starter guide"
+          >
+            <span data-icon="book"></span><span data-copy>STARTER GUIDE</span> <kbd>H</kbd></button
           ><span class="foot-hair"></span><span id="frame-data" title="Measured rendering rate">— FPS</span>
         </div>
       </footer>
       <dialog id="drawer" aria-labelledby="dialog-title">
         <div class="dialog-head">
-          <span class="eyebrow">DD <b>/</b> FIELD SYSTEMS</span
+          <span class="eyebrow">DD <b>/</b> <span data-copy>FIELD SYSTEMS</span></span
           ><button id="close-panel" aria-label="Close dialog" title="Close [Esc]" data-icon="close"></button>
         </div>
         <div id="dialog-body"></div>

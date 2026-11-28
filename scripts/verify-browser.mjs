@@ -7,6 +7,7 @@ import { extname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { verifyBilingual } from './verify-bilingual.mjs'
+import { verifyGuideLanguage } from './verify-guide-language.mjs'
 import { verifyTitleGround } from './verify-title-ground.mjs'
 import {
   verifyOverworldChrome,
@@ -85,6 +86,7 @@ const report = {
   pixelChecks: [],
   titleGround: [],
   bilingual: [],
+  guideLanguage: [],
 }
 let browser,
   page,
@@ -595,6 +597,12 @@ try {
     await waitUI('.city-dispatch [data-ui="event"]', 'contains', '+32 alloy / +1 core')
     await capture('08-return')
   })
+  await check(
+    'Switched the desktop UI language and resumed the field guide and sortie after reload',
+    async () => {
+      report.guideLanguage.push(await verifyGuideLanguage(page, { artifactsDir: output }))
+    },
+  )
   await check('Opened a fresh touch viewport', async () => {
     const url = page.url()
     await page.close()
@@ -619,6 +627,9 @@ try {
     await button('Export JSON').waitFor()
     assert.match(await page.locator('.sample-result').innerText(), /FPS · P95/)
     await button('Close dialog').click()
+  })
+  await check('Read the guide and switched languages from the touch controls', async () => {
+    report.guideLanguage.push(await verifyGuideLanguage(page, { artifactsDir: output }))
   })
   await check('Kept the mobile bilingual titles inside their HUDs and above open survey ground', async () => {
     for (const [mode, heading] of [
